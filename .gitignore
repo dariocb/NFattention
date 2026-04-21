@@ -33,5 +33,6 @@ experiments/**/figures/
 experiments/mnist_ablation/mnist_focused_results*/
 
 # Logs and ad-hoc run dumps
+logs
 *.log
 experiments/text_classification/text_seq_classification_benchmark/m[0-9]*

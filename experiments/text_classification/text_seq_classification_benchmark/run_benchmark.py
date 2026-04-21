@@ -54,6 +54,10 @@ DATASET_CONFIG = {
     "yelp_review_full": {
         "use_cv": False,
         "description": "Yelp Full (五分类)"
+    },
+    "quora": {
+        "use_cv": False,
+        "description": "Quora QQP (二分类)"
     }
 }
 

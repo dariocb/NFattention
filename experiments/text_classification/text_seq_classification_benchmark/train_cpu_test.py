@@ -86,7 +86,7 @@ def evaluate(model, dataloader, criterion, device):
 def main():
     parser = argparse.ArgumentParser(description='CPU 训练快速测试')
     parser.add_argument('--dataset', type=str, default='trec', 
-                       choices=['rt_polarity', 'sst2', 'sst5', 'trec', 'ag_news', 'dbpedia_14', 'yelp_review_full'],
+                       choices=['rt_polarity', 'sst2', 'sst5', 'trec', 'ag_news', 'dbpedia_14', 'yelp_review_full', 'quora'],
                        help='数据集')
     parser.add_argument('--model', type=str, default='transformer',
                        choices=['transformer', 'mikan', 'mgk', 'performer', 'rka', 'gmm_rks', 'ours_fixed_qk', 'ours_trainable_qk'],

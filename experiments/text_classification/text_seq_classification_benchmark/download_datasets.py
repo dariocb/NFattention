@@ -53,6 +53,14 @@ def download_all_datasets():
             "label_field": "label",
             "num_classes": 5,
             "class_names": ["1 star", "2 stars", "3 stars", "4 stars", "5 stars"]
+        },
+        "quora": {
+            "path": "glue",
+            "name": "qqp",
+            "text_field": ("question1", "question2"),
+            "label_field": "label",
+            "num_classes": 2,
+            "class_names": ["not_duplicate", "duplicate"]
         }
     }
     
@@ -72,25 +80,40 @@ def download_all_datasets():
             # 加载数据集
             print(f"   从 HuggingFace 加载...")
             try:
-                dataset = load_dataset(config["path"], trust_remote_code=True)
+                if "name" in config:
+                    dataset = load_dataset(config["path"], config["name"], trust_remote_code=True)
+                else:
+                    dataset = load_dataset(config["path"], trust_remote_code=True)
             except TypeError:
                 # 旧版本 datasets 不支持 trust_remote_code 参数
-                dataset = load_dataset(config["path"])
+                if "name" in config:
+                    dataset = load_dataset(config["path"], config["name"])
+                else:
+                    dataset = load_dataset(config["path"])
+
+            def to_text(example):
+                if isinstance(config["text_field"], tuple):
+                    q1 = str(example[config["text_field"][0]])
+                    q2 = str(example[config["text_field"][1]])
+                    return f"Q1: {q1} [SEP] Q2: {q2}"
+                return example[config["text_field"]]
             
             # 提取训练集
             print(f"   处理训练集...")
             train_texts = []
             train_labels = []
             for example in tqdm(dataset["train"], desc="   Train"):
-                train_texts.append(example[config["text_field"]])
+                train_texts.append(to_text(example))
                 train_labels.append(example[config["label_field"]])
             
             # 提取测试集
             print(f"   处理测试集...")
+            # GLUE QQP 的 test split 没有标签，这里统一使用 validation 作为 test
+            test_split = "validation" if ds_name == "quora" else "test"
             test_texts = []
             test_labels = []
-            for example in tqdm(dataset["test"], desc="   Test"):
-                test_texts.append(example[config["text_field"]])
+            for example in tqdm(dataset[test_split], desc="   Test"):
+                test_texts.append(to_text(example))
                 test_labels.append(example[config["label_field"]])
             
             # 保存为 JSON
@@ -152,4 +175,3 @@ def download_all_datasets():
 if __name__ == "__main__":
     success = download_all_datasets()
     sys.exit(0 if success else 1)
-

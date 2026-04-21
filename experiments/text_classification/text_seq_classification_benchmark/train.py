@@ -585,6 +585,7 @@ def run_all_experiments(
         "ag_news": {"use_cv": False},
         "dbpedia_14": {"use_cv": False},
         "yelp_review_full": {"use_cv": False},
+        "quora": {"use_cv": False},
     }
     
     # 计算总实验数
@@ -690,7 +691,7 @@ def main():
     args = parser.parse_args()
     
     # 默认配置
-    all_datasets = ["rt_polarity", "sst2", "sst5", "trec", "ag_news", "dbpedia_14", "yelp_review_full"]
+    all_datasets = ["rt_polarity", "sst2", "sst5", "trec", "ag_news", "dbpedia_14", "yelp_review_full", "quora"]
     all_models = [
         "transformer",      # Standard Transformer baseline
         "mikan",            # MIKAN baseline
