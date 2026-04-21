@@ -1,0 +1,13 @@
+# NFattention — dependencies for text benchmark, LRA memory benchmark, and MNIST ablations.
+# Python 3.9+ recommended. Install PyTorch for your platform from https://pytorch.org/ if needed.
+
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.22.0
+scikit-learn>=1.2.0
+PyYAML>=6.0
+datasets>=2.14.0
+tqdm>=4.65.0
+normflows>=1.6.0
+matplotlib>=3.7.0
+pandas>=1.5.0

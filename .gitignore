@@ -1,0 +1,37 @@
+# Python / virtual env
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+build/
+dist/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Project datasets (keep dataset loader/generator code, ignore downloaded payloads)
+experiments/text_classification/data/
+data/
+
+# Experiment outputs and run artifacts (keep source scripts/configs tracked)
+experiments/**/results/
+experiments/**/benchmark_results*/
+experiments/**/test_results/
+experiments/**/figures/
+experiments/mnist_ablation/mnist_focused_results*/
+
+# Logs and ad-hoc run dumps
+*.log
+experiments/text_classification/text_seq_classification_benchmark/m[0-9]*

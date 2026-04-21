@@ -1,0 +1,5 @@
+# 文本分类 benchmark 云端最小依赖（GPU/CPU 均可；无 flash-linear-attention）
+torch>=2.0
+numpy>=1.20
+scikit-learn>=1.0
+PyYAML>=6.0
