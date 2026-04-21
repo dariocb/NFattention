@@ -603,6 +603,10 @@ def main():
         
         # 20-21. FRSKA + NoQK + LearnableV (共享NF)
         ("FRSKA (共享NF) + NoQK + LearnableV", "frska", False, False, True, "no_qk", "learnable"),
+        
+        # # 22. MGK
+        # ("MGK", "mgk", False, False, False, "normal", "learnable"),
+
     ]
 
     # 运行实验

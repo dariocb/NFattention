@@ -48,6 +48,10 @@ models:
   # MIKAN baseline (Implicit Kernel Attention)
   - name: "mikan"
     enabled: true
+  
+  # MGK baseline (Mixture of Gaussian Keys)
+  - name: "mgk"
+    enabled: true
     
   # Performer baseline (FAVOR+ linear attention)
   - name: "performer"
@@ -112,4 +116,3 @@ logging:
   level: "INFO"
   save_model: true                 # 是否保存模型
   save_predictions: false          # 是否保存预测结果
-

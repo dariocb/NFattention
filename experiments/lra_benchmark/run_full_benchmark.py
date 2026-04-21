@@ -25,7 +25,7 @@ def run_full_benchmark(args):
     if args.quick_test:
         # 快速测试模式（本地 CPU 验证）
         model_types = [
-            "transformer", "mikan", "performer", "rka", "gmm_rks",
+            "transformer", "mikan", "performer", "rka", "gmm_rks", "mgk",
             "kpca_scaled", "metala", "ours_latest",
         ]
         seq_lens = [128, 256, 512]
@@ -37,7 +37,7 @@ def run_full_benchmark(args):
     else:
         # 完整测试模式（云端 GPU）
         model_types = args.models if args.models else [
-            "transformer", "mikan", "performer", "rka", "gmm_rks",
+            "transformer", "mikan", "performer", "rka", "gmm_rks", "mgk",
             "kpca_scaled", "metala", "ours_latest",
         ]
         seq_lens = args.seq_lens if args.seq_lens else [256, 512, 1024, 2048, 4096]
@@ -193,4 +193,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     run_full_benchmark(args)
-

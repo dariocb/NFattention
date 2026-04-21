@@ -472,7 +472,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="LRA Memory Benchmark")
     parser.add_argument("--models", nargs="+", 
                         default=[
-                            "transformer", "mikan", "performer", "rka", "gmm_rks",
+                            "transformer", "mikan", "performer", "rka", "gmm_rks", "mgk",
                             "kpca_scaled", "metala", "ours_latest",
                         ],
                         help="Models to benchmark")
@@ -504,4 +504,3 @@ if __name__ == "__main__":
     
     # 打印汇总
     print_summary_table(results)
-

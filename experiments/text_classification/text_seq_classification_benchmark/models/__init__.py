@@ -4,6 +4,7 @@ Model implementations for text sequence classification.
 Supported models:
 - transformer: Standard multi-head self-attention (dot-product attention)
 - mikan: Multi-head Implicit Kernel Attention Network (IKAN-direct)
+- mgk: Mixture of Gaussian Keys baseline
 - ours_latest: Latest full setting (no_qk + fixed_orth_v + shared_flow)
 - ours_fixed_qk: Our method with frozen Q, K projections
 - ours_trainable_qk: Our method with trainable Q, K projections
@@ -17,6 +18,7 @@ Supported models:
 from .base import BaseClassifier
 from .transformer import TransformerClassifier
 from .mikan import MIKANClassifier
+from .mgk import MGKClassifier
 from .ours import OursClassifier
 from .performer import PerformerClassifier
 from .rka import RKAClassifier
@@ -28,6 +30,7 @@ __all__ = [
     'BaseClassifier',
     'TransformerClassifier',
     'MIKANClassifier', 
+    'MGKClassifier',
     'OursClassifier',
     'PerformerClassifier',
     'RKAClassifier',
@@ -52,6 +55,7 @@ def get_model(model_name: str, **kwargs):
     Supported models:
         - "transformer": Standard Transformer with dot-product attention
         - "mikan": MIKAN (Implicit Kernel Attention)
+        - "mgk": MGK (Mixture of Gaussian Keys)
         - "ours_latest": Latest full setting (no_qk + fixed_orth_v + shared_flow)
         - "ours_fixed_qk": Our method with frozen Q, K projections
         - "ours_trainable_qk": Our method with trainable Q, K projections
@@ -67,6 +71,9 @@ def get_model(model_name: str, **kwargs):
         
         # MIKAN baseline
         "mikan": MIKANClassifier,
+        
+        # MGK baseline
+        "mgk": MGKClassifier,
 
         # Our latest full setting used as main model
         "ours_latest": lambda **kw: OursClassifier(

@@ -25,6 +25,7 @@ COLORS = {
     'performer': '#3498DB',       # 蓝色
     'rka': '#8E44AD',             # 深紫色
     'gmm_rks': '#2ECC71',         # 绿色
+    'mgk': '#27AE60',             # 深绿
     'kpca_scaled': '#16A085',     # 深青绿
     'metala': '#D35400',          # 南瓜橙
     'ours_latest': '#F39C12',        # 橙色/金色
@@ -38,6 +39,7 @@ MARKERS = {
     'performer': 's',
     'rka': 'p',
     'gmm_rks': '^',
+    'mgk': 'd',
     'kpca_scaled': 'v',
     'metala': 'P',
     'ours_latest': '*',
@@ -51,6 +53,7 @@ MODEL_NAMES = {
     'performer': 'Performer',
     'rka': 'RKA',
     'gmm_rks': 'GMM-RKS',
+    'mgk': 'MGK',
     'kpca_scaled': 'KPCA-Scaled',
     'metala': 'MetaLA',
     'ours_latest': 'Ours (Latest)',
@@ -656,4 +659,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     generate_all_figures(args.results_file, args.output_dir)
-

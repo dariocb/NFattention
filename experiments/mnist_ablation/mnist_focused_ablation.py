@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import json
 import os
 import random
@@ -47,6 +47,7 @@ def focused_experiments():
         ("Transformer + NoQK + FixedV", "dot", True, True, False, "no_qk", "learnable", {"dot_qk_mode": "no_qk"}),
         ("IKAN-direct", "ikandirect", False, False, False, "normal", "learnable", {}),
         ("MIKAN", "mikan", False, False, False, "normal", "learnable", {}),
+        ("MGK", "mgk", False, False, False, "normal", "learnable", {}),
         (
             "FRSKA-Strict-Base",
             "frska",

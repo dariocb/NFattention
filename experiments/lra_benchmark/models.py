@@ -7,6 +7,7 @@ LRA 实验模型定义
 - performer: Performer (FAVOR+)
 - rka: RKA (Random Kernel Attention)
 - gmm_rks: GMM-RKS
+- mgk: MGK (Mixture of Gaussian Keys)
 - kpca_scaled: KPCA 仓库 Scaled Attention (Teo & Nguyen, NeurIPS 2024)
 - metala: MetaLA 风格 GLA mixer (Chou et al., NeurIPS 2024)
 - ours_latest: 我们最新版本 (no_qk + fixed_orth_v + shared spectral)
@@ -411,6 +412,79 @@ class GMMRKSAttention(nn.Module):
         return self.W_o(out)
 
 
+class MGKAttention(nn.Module):
+    """MGK baseline: Mixture of Gaussian Keys with key-conditioned Gaussian-mixture logits."""
+
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        M: int = 64,
+        dropout: float = 0.1,
+        num_components: int = 4,
+    ):
+        super().__init__()
+        assert d_model % n_heads == 0
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.d_k = d_model // n_heads
+        self.num_components = max(1, int(num_components))
+        self.proj_dim = max(16, d_model // 4)
+        self.log2pi = math.log(2.0 * math.pi)
+
+        self.q_proj = nn.Linear(d_model, self.n_heads * self.proj_dim)
+        self.k_mu_proj = nn.Linear(d_model, self.n_heads * self.num_components * self.proj_dim)
+        self.k_logvar_proj = nn.Linear(d_model, self.n_heads * self.num_components * self.proj_dim)
+        self.k_mix_proj = nn.Linear(d_model, self.n_heads * self.num_components)
+
+        self.W_v = nn.Linear(d_model, d_model)
+        self.W_o = nn.Linear(d_model, d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def _mgk_logits(self, q: torch.Tensor, k: torch.Tensor) -> torch.Tensor:
+        bsz, lq, _ = q.shape
+        _, lk, _ = k.shape
+
+        qz = self.q_proj(q).view(bsz, lq, self.n_heads, self.proj_dim)
+        mu = self.k_mu_proj(k).view(
+            bsz, lk, self.n_heads, self.num_components, self.proj_dim
+        )
+        logvar = self.k_logvar_proj(k).view(
+            bsz, lk, self.n_heads, self.num_components, self.proj_dim
+        ).clamp(min=-8.0, max=6.0)
+        mix_logits = self.k_mix_proj(k).view(
+            bsz, lk, self.n_heads, self.num_components
+        )
+        log_pi = F.log_softmax(mix_logits, dim=-1)
+
+        qz_e = qz.unsqueeze(2).unsqueeze(4)
+        mu_e = mu.unsqueeze(1)
+        logvar_e = logvar.unsqueeze(1)
+
+        diff = qz_e - mu_e
+        inv_var = torch.exp(-logvar_e)
+        quad = (diff * diff * inv_var).sum(dim=-1)
+        log_det = logvar_e.sum(dim=-1)
+
+        ll = -0.5 * (quad + log_det + self.proj_dim * self.log2pi)
+        logits = torch.logsumexp(log_pi.unsqueeze(1) + ll, dim=-1)
+        return logits.permute(0, 3, 1, 2).contiguous()
+
+    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        bsz, lq, _ = x.shape
+        energy = self._mgk_logits(x, x)
+        if mask is not None:
+            energy = energy.masked_fill(mask == 0, float("-inf"))
+
+        attn = F.softmax(energy, dim=-1)
+        attn = self.dropout(attn)
+
+        v = self.W_v(x).view(bsz, lq, self.n_heads, self.d_k).transpose(1, 2)
+        out = torch.matmul(attn, v)
+        out = out.transpose(1, 2).contiguous().view(bsz, lq, self.d_model)
+        return self.W_o(out)
+
+
 # ============================================================
 # 5b. KPCA Scaled Attention（与 text_classification.models.kpca_scaled 一致）
 # ============================================================
@@ -767,6 +841,8 @@ class LRAModel(nn.Module):
                 return RKAAttention(d_model, n_heads, M, dropout)
             elif attention_type == "gmm_rks":
                 return GMMRKSAttention(d_model, n_heads, M, dropout)
+            elif attention_type == "mgk":
+                return MGKAttention(d_model, n_heads, M, dropout)
             elif attention_type == "kpca_scaled":
                 return KPCAScaledAttention(d_model, n_heads, dropout)
             elif attention_type == "metala":
@@ -826,6 +902,7 @@ MODEL_TYPES = [
     "performer",       # Performer (FAVOR+)
     "rka",             # RKA (Random Kernel Attention)
     "gmm_rks",         # GMM-RKS
+    "mgk",             # MGK (Mixture of Gaussian Keys)
     "kpca_scaled",     # KPCA Scaled Attention
     "metala",          # MetaLA-style GLA
     "ours_latest",     # 我们的方法 (latest full setting)
