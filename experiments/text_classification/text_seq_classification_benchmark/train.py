@@ -695,7 +695,6 @@ def main():
     all_models = [
         "transformer",      # Standard Transformer baseline
         "mikan",            # MIKAN baseline
-        "mgk",              # MGK baseline
         "performer",        # Performer (FAVOR+) baseline
         "rka",              # RKA (Random Kernel Attention) baseline
         "gmm_rks",          # GMM-RKS baseline
