@@ -446,9 +446,9 @@ def run_single_experiment(
     model = get_model(model_name, **model_params)
     model = model.to(device)
 
-    if model_name == "ours_latest":
+    if model_name in {"ours_latest", "ours_latest_head_kernel"}:
         print(
-            "     Ours latest config: "
+            "     Ours-family config: "
             f"qk_mode={getattr(model, 'qk_mode', 'unknown')}, "
             f"v_mode={getattr(model, 'v_mode', 'unknown')}, "
             f"shared_flow={getattr(model, 'shared_flow', 'unknown')}, "
@@ -701,6 +701,7 @@ def main():
         "kpca_scaled",      # KPCA repo scaled attention (Teo & Nguyen, NeurIPS 2024)
         "metala",           # MetaLA-style GLA (Chou et al., NeurIPS 2024)
         "ours_latest",      # 主模型：no_qk + fixed_orth_v + shared_flow
+        "ours_latest_head_kernel",  # 新模型：单共享kernel + head-id embedding
         "ours_fixed_qk",    # Our method (frozen Q,K)
         "ours_trainable_qk" # Our method (trainable Q,K)
     ]

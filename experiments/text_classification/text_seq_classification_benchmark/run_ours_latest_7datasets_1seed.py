@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run only ours_latest on 7 datasets with a single seed.
+Run only ours_latest_head_kernel on 7 datasets with a single seed.
 Overrides:
 - M = 96
 - num_flows = 5
@@ -27,12 +27,12 @@ DATASETS_7 = [
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run ours_latest on 7 datasets with one seed")
+    parser = argparse.ArgumentParser(description="Run ours_latest_head_kernel on 7 datasets with one seed")
     parser.add_argument("--seed", type=int, default=0, help="Single random seed")
     parser.add_argument("--gpu", type=int, default=None, help="GPU ID")
     parser.add_argument("--config", type=str, default="config/default_config.yaml", help="Config path")
     parser.add_argument("--data_dir", type=str, default="../data", help="Data directory")
-    parser.add_argument("--output_dir", type=str, default="benchmark_results_ours_latest_7d_1seed", help="Output root directory")
+    parser.add_argument("--output_dir", type=str, default="benchmark_results_ours_latest_head_kernel_7d_1seed", help="Output root directory")
     parser.add_argument("--no_progress", action="store_true", help="Disable live epoch progress")
     args = parser.parse_args()
 
@@ -46,7 +46,7 @@ def main():
     config["model_params"]["num_mixtures"] = config["model_params"].get("num_mixtures", 10)
 
     seeds = [args.seed]
-    models = ["ours_latest"]
+    models = ["ours_latest_head_kernel"]
     datasets = DATASETS_7
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -55,9 +55,9 @@ def main():
     save_config(config, os.path.join(out_dir, "config.yaml"))
 
     device = get_device(args.gpu)
-    logger = setup_logging(out_dir, "benchmark_ours_latest_7d_1seed")
+    logger = setup_logging(out_dir, "benchmark_ours_latest_head_kernel_7d_1seed")
     logger.info("=" * 60)
-    logger.info("Ours Latest: 7 Datasets + 1 Seed")
+    logger.info("Ours Latest Head Kernel: 7 Datasets + 1 Seed")
     logger.info("=" * 60)
     logger.info(f"datasets: {datasets}")
     logger.info(f"models: {models}")
@@ -82,4 +82,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

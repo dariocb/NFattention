@@ -63,7 +63,8 @@ DATASET_CONFIG = {
 
 # 模型列表
 MODELS = [
-    "ours_latest"
+    "ours_latest",
+    "ours_latest_head_kernel",
 ]
 
 

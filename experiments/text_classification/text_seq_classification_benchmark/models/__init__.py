@@ -6,6 +6,7 @@ Supported models:
 - mikan: Multi-head Implicit Kernel Attention Network (IKAN-direct)
 - mgk: Mixture of Gaussian Keys baseline
 - ours_latest: Latest full setting (no_qk + fixed_orth_v + shared_flow)
+- ours_latest_head_kernel: Single shared kernel + head-id embedding (no_qk + fixed_orth_v)
 - ours_fixed_qk: Our method with frozen Q, K projections
 - ours_trainable_qk: Our method with trainable Q, K projections
 - performer: FAVOR+ linear attention (Choromanski et al., 2020)
@@ -19,7 +20,7 @@ from .base import BaseClassifier
 from .transformer import TransformerClassifier
 from .mikan import MIKANClassifier
 from .mgk import MGKClassifier
-from .ours import OursClassifier
+from .ours import OursClassifier, OursSharedKernelClassifier
 from .performer import PerformerClassifier
 from .rka import RKAClassifier
 from .gmm_rks import GMMRKSClassifier
@@ -32,6 +33,7 @@ __all__ = [
     'MIKANClassifier', 
     'MGKClassifier',
     'OursClassifier',
+    'OursSharedKernelClassifier',
     'PerformerClassifier',
     'RKAClassifier',
     'GMMRKSClassifier',
@@ -57,6 +59,7 @@ def get_model(model_name: str, **kwargs):
         - "mikan": MIKAN (Implicit Kernel Attention)
         - "mgk": MGK (Mixture of Gaussian Keys)
         - "ours_latest": Latest full setting (no_qk + fixed_orth_v + shared_flow)
+        - "ours_latest_head_kernel": Single shared kernel + head-id embedding
         - "ours_fixed_qk": Our method with frozen Q, K projections
         - "ours_trainable_qk": Our method with trainable Q, K projections
         - "performer": Performer with FAVOR+ attention
@@ -80,6 +83,14 @@ def get_model(model_name: str, **kwargs):
             qk_mode='no_qk',
             v_mode='fixed_orth',
             shared_flow=True,
+            freeze_qk=False,
+            **kw
+        ),
+
+        # New variant: one shared kernel net conditioned on head-id embedding
+        "ours_latest_head_kernel": lambda **kw: OursSharedKernelClassifier(
+            qk_mode='no_qk',
+            v_mode='fixed_orth',
             freeze_qk=False,
             **kw
         ),

@@ -12,16 +12,17 @@ from utils import load_config, save_config, get_device, setup_logging
 
 
 ALL_MODELS = [
-    "transformer",
-    "mikan",
-    "performer",
-    "rka",
-    "gmm_rks",
-    "kpca_scaled",
+    # "transformer",
+    # "mikan",
+    # "performer",
+    # "rka",
+    # "gmm_rks",
+    # "kpca_scaled",
     "metala",
-    "ours_latest",
-    "ours_fixed_qk",
-    "ours_trainable_qk",
+    "ours_latest_head_kernel",
+    # "ours_latest",
+    # "ours_fixed_qk",
+    # "ours_trainable_qk",
 ]
 
 

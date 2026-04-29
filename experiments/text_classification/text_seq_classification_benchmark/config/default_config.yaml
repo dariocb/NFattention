@@ -73,6 +73,10 @@ models:
   - name: "ours_trainable_qk"
     enabled: true
 
+  # Our latest variant: single shared kernel + head-id embedding
+  - name: "ours_latest_head_kernel"
+    enabled: true
+
 # 模型超参数
 model_params:
   # 共享参数
