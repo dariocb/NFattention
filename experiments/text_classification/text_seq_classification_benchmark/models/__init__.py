@@ -20,7 +20,7 @@ from .base import BaseClassifier
 from .transformer import TransformerClassifier
 from .mikan import MIKANClassifier
 from .mgk import MGKClassifier
-from .ours import OursClassifier, OursSharedKernelClassifier
+from .ours import OursClassifier
 from .performer import PerformerClassifier
 from .rka import RKAClassifier
 from .gmm_rks import GMMRKSClassifier
@@ -33,7 +33,6 @@ __all__ = [
     'MIKANClassifier', 
     'MGKClassifier',
     'OursClassifier',
-    'OursSharedKernelClassifier',
     'PerformerClassifier',
     'RKAClassifier',
     'GMMRKSClassifier',
@@ -88,9 +87,10 @@ def get_model(model_name: str, **kwargs):
         ),
 
         # New variant: one shared kernel net conditioned on head-id embedding
-        "ours_latest_head_kernel": lambda **kw: OursSharedKernelClassifier(
+        "ours_latest_head_kernel": lambda **kw: OursClassifier(
             qk_mode='no_qk',
             v_mode='fixed_orth',
+            use_shared_kernel=True,
             freeze_qk=False,
             **kw
         ),

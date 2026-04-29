@@ -115,6 +115,7 @@ class OursMultiHeadAttention(nn.Module):
         qk_mode: str = 'no_qk',
         v_mode: str = 'fixed_orth',
         shared_flow: bool = True,
+        use_shared_kernel: bool = False,
         freeze_qk: bool = False,
         num_flows: int = 3,
         flow_hidden_dim: int = 64,
@@ -134,6 +135,7 @@ class OursMultiHeadAttention(nn.Module):
         self.qk_mode = qk_mode
         self.v_mode = v_mode
         self.shared_flow = shared_flow
+        self.use_shared_kernel = use_shared_kernel
         
         # Q, K, V 投影
         self.fc_q = nn.Linear(hidden_dim, hidden_dim)
@@ -178,6 +180,10 @@ class OursMultiHeadAttention(nn.Module):
         
         self.dropout = nn.Dropout(dropout)
         self.scale = math.sqrt(self.head_dim)
+
+        if self.use_shared_kernel:
+            self.head_embedding_q = nn.Embedding(n_heads, self.head_dim)
+            self.head_embedding_k = nn.Embedding(n_heads, self.head_dim)
         
         # 如果 freeze_qk=True，冻结 Q 和 K
         if freeze_qk and self.qk_mode == 'normal':
@@ -304,6 +310,14 @@ class OursMultiHeadAttention(nn.Module):
         # 从 Flow 采样 omega
         omega1, omega2 = self.sample_spectral_density(batch_size)
         
+        # Shared-kernel mode: condition all heads with head-id embedding.
+        if self.use_shared_kernel:
+            head_ids = torch.arange(self.n_heads, device=Q.device)
+            head_emb_q = self.head_embedding_q(head_ids).view(1, self.n_heads, 1, self.head_dim)
+            head_emb_k = self.head_embedding_k(head_ids).view(1, self.n_heads, 1, self.head_dim)
+            Q = Q + head_emb_q
+            K = K + head_emb_k
+
         # 计算 RFF 特征
         phi_Q = self.compute_rff_features(Q, omega1, omega2)
         phi_K = self.compute_rff_features(K, omega1, omega2)
@@ -311,6 +325,12 @@ class OursMultiHeadAttention(nn.Module):
         # 数值稳定修复：将特征映射到正域，避免分母符号翻转
         phi_Q_pos = torch.nn.functional.elu(phi_Q) + 1.0
         phi_K_pos = torch.nn.functional.elu(phi_K) + 1.0
+
+        if mask is not None:
+            # mask: [b,1,1,l] -> [b,1,l,1]
+            key_mask = mask.squeeze(1).transpose(1, 2).unsqueeze(1)
+            phi_K_pos = phi_K_pos * key_mask
+            V = V * key_mask
 
         # 论文 Eq.(9c) 线性重排
         kv_summary = torch.einsum('bhlm,bhld->bhmd', phi_K_pos, V)      # [b,h,2M,d]
@@ -372,6 +392,7 @@ class OursEncoderLayer(nn.Module):
         qk_mode: str = 'no_qk',
         v_mode: str = 'fixed_orth',
         shared_flow: bool = True,
+        use_shared_kernel: bool = False,
         freeze_qk: bool = False,
         num_flows: int = 3,
         flow_hidden_dim: int = 64,
@@ -389,6 +410,7 @@ class OursEncoderLayer(nn.Module):
             qk_mode=qk_mode,
             v_mode=v_mode,
             shared_flow=shared_flow,
+            use_shared_kernel=use_shared_kernel,
             freeze_qk=freeze_qk,
             num_flows=num_flows,
             flow_hidden_dim=flow_hidden_dim,
@@ -438,6 +460,7 @@ class OursClassifier(BaseClassifier):
         qk_mode: str = 'no_qk',
         v_mode: str = 'fixed_orth',
         shared_flow: bool = True,
+        use_shared_kernel: bool = False,
         freeze_qk: bool = False,
         num_flows: int = 3,
         flow_hidden_dim: int = 64,
@@ -464,12 +487,13 @@ class OursClassifier(BaseClassifier):
         self.qk_mode = qk_mode
         self.v_mode = v_mode
         self.shared_flow = shared_flow
+        self.use_shared_kernel = use_shared_kernel
         self.freeze_qk = freeze_qk
         self.num_flows = num_flows
         self.flow_hidden_dim = flow_hidden_dim
         self.num_mixtures = num_mixtures
         self.kl_lambda = kl_lambda
-        
+
         # 编码器层
         self.layers = nn.ModuleList([
             OursEncoderLayer(
@@ -482,11 +506,12 @@ class OursClassifier(BaseClassifier):
                 qk_mode=qk_mode,
                 v_mode=v_mode,
                 shared_flow=shared_flow,
+                use_shared_kernel=use_shared_kernel,
                 freeze_qk=freeze_qk,
                 num_flows=num_flows,
                 flow_hidden_dim=flow_hidden_dim,
                 num_mixtures=num_mixtures,
-                kl_lambda=kl_lambda
+                kl_lambda=kl_lambda,
             )
             for _ in range(n_layers)
         ])
@@ -516,316 +541,4 @@ class OursClassifier(BaseClassifier):
             x, _, kl_div = layer(x, mask)
             total_kl_div = total_kl_div + kl_div
         
-        return x, total_kl_div
-
-
-class OursSharedKernelMultiHeadAttention(nn.Module):
-    """Single shared spectral kernel conditioned by head-id embedding."""
-
-    def __init__(
-        self,
-        hidden_dim: int,
-        n_heads: int,
-        M: int = 64,
-        dropout: float = 0.1,
-        device: str = 'cpu',
-        qk_mode: str = 'no_qk',
-        v_mode: str = 'fixed_orth',
-        freeze_qk: bool = False,
-        num_flows: int = 3,
-        flow_hidden_dim: int = 64,
-        num_mixtures: int = 10,
-        kl_lambda: float = 0.001,
-    ):
-        super().__init__()
-        assert hidden_dim % n_heads == 0
-
-        self.hidden_dim = hidden_dim
-        self.n_heads = n_heads
-        self.head_dim = hidden_dim // n_heads
-        self.M = M
-        self.device = device
-        self.qk_mode = qk_mode
-        self.v_mode = v_mode
-        self.kl_lambda = kl_lambda
-        self.shared_flow = True
-        self.num_flows = num_flows
-        self.flow_hidden_dim = flow_hidden_dim
-
-        self.fc_q = nn.Linear(hidden_dim, hidden_dim)
-        self.fc_k = nn.Linear(hidden_dim, hidden_dim)
-        self.fc_v = nn.Linear(hidden_dim, hidden_dim)
-        self.fc_o = nn.Linear(hidden_dim, hidden_dim)
-
-        # One shared spectral kernel for all heads.
-        self.flow = SpectralFlow(
-            dim=self.head_dim * 2,
-            num_flows=num_flows,
-            hidden_dim=flow_hidden_dim,
-            num_mixtures=num_mixtures,
-            device=device
-        )
-
-        if self.v_mode == 'fixed_orth':
-            g = torch.Generator(device='cpu')
-            g.manual_seed(42)
-            rand_mat = torch.randn(hidden_dim, hidden_dim, generator=g)
-            q, _ = torch.linalg.qr(rand_mat)
-            fixed_v = torch.zeros(n_heads, hidden_dim, self.head_dim)
-            for h in range(n_heads):
-                start = h * self.head_dim
-                end = (h + 1) * self.head_dim
-                fixed_v[h] = q[:, start:end]
-            self.register_buffer('fixed_v_weights', fixed_v)
-
-        # Per-head embedding added to head input (sum, not concat).
-        self.head_embedding = nn.Embedding(n_heads, self.head_dim)
-
-        self.dropout = nn.Dropout(dropout)
-
-        if freeze_qk and self.qk_mode == 'normal':
-            nn.init.orthogonal_(self.fc_q.weight)
-            nn.init.orthogonal_(self.fc_k.weight)
-            self.fc_q.weight.requires_grad = False
-            self.fc_q.bias.requires_grad = False
-            self.fc_k.weight.requires_grad = False
-            self.fc_k.bias.requires_grad = False
-
-    def compute_rff_features(
-        self,
-        x: torch.Tensor,
-        omega1: torch.Tensor,
-        omega2: torch.Tensor
-    ) -> torch.Tensor:
-        # Same RFF mapping as OursMultiHeadAttention.
-        x_spectral1 = (2 * np.pi) * torch.einsum('bhnd,bhmd->bhnm', x, omega1)
-        x_spectral2 = (2 * np.pi) * torch.einsum('bhnd,bhmd->bhnm', x, omega2)
-
-        x_spectral1 = torch.clamp(x_spectral1, min=-10.0, max=10.0)
-        x_spectral2 = torch.clamp(x_spectral2, min=-10.0, max=10.0)
-
-        scale_factor = math.sqrt(1.0 / (4.0 * self.M))
-        phi = scale_factor * torch.cat([
-            x_spectral1.cos() + x_spectral2.cos(),
-            x_spectral1.sin() + x_spectral2.sin()
-        ], dim=-1)
-        return phi
-
-    def sample_spectral_density(self, batch_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        num_samples = self.n_heads * batch_size * self.M
-        if HAS_NORMFLOWS and self.flow.nfm is not None:
-            omega_samples, _ = self.flow.nfm.sample(num_samples=num_samples)
-        else:
-            omega_samples = self.flow.sample(num_samples)
-        omega_samples = torch.clamp(omega_samples, min=-10.0, max=10.0)
-        if torch.isnan(omega_samples).any():
-            omega_samples = torch.randn_like(omega_samples) * 0.5
-        omega = omega_samples.view(batch_size, self.n_heads, self.M, 2 * self.head_dim)
-        omega1, omega2 = torch.chunk(omega, chunks=2, dim=-1)
-        return omega1, omega2
-
-    def forward(
-        self,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-        mask: Optional[torch.Tensor] = None
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        batch_size = query.shape[0]
-        seq_len = query.shape[1]
-
-        if self.qk_mode == 'no_qk':
-            Q = query
-            K = key
-        else:
-            Q = self.fc_q(query)
-            K = self.fc_k(key)
-
-        if self.v_mode == 'fixed_orth':
-            V = torch.einsum('bsd,hdk->bshk', value, self.fixed_v_weights)
-            V = V.permute(0, 2, 1, 3).contiguous()
-        else:
-            V = self.fc_v(value)
-            V = V.view(batch_size, seq_len, self.n_heads, self.head_dim).permute(0, 2, 1, 3)
-
-        Q = Q.view(batch_size, seq_len, self.n_heads, self.head_dim).permute(0, 2, 1, 3)
-        K = K.view(batch_size, seq_len, self.n_heads, self.head_dim).permute(0, 2, 1, 3)
-
-        # Add per-head embedding before shared spectral kernel mapping.
-        head_ids = torch.arange(self.n_heads, device=Q.device)
-        head_emb = self.head_embedding(head_ids).view(1, self.n_heads, 1, self.head_dim)
-        Q_cond = Q + head_emb
-        K_cond = K + head_emb
-
-        omega1, omega2 = self.sample_spectral_density(batch_size)
-        phi_Q = self.compute_rff_features(Q_cond, omega1, omega2)
-        phi_K = self.compute_rff_features(K_cond, omega1, omega2)
-
-        # Match original stable linear path.
-        phi_Q = F.elu(phi_Q) + 1.0
-        phi_K = F.elu(phi_K) + 1.0
-
-        if mask is not None:
-            # mask: [b,1,1,l] -> [b,1,l,1]
-            key_mask = mask.squeeze(1).transpose(1, 2).unsqueeze(1)
-            phi_K = phi_K * key_mask
-            V = V * key_mask
-
-        kv_summary = torch.einsum('bhlm,bhld->bhmd', phi_K, V)
-        k_summary = torch.sum(phi_K, dim=2)
-        numerator = torch.einsum('bhlm,bhmd->bhld', phi_Q, kv_summary)
-        denominator = torch.einsum('bhlm,bhm->bhl', phi_Q, k_summary)
-        denominator = torch.clamp(denominator, min=1e-6).unsqueeze(-1)
-        x = numerator / denominator
-        x = self.dropout(x)
-
-        attention = torch.matmul(phi_Q, phi_K.transpose(-2, -1))
-        attention = torch.nan_to_num(attention, nan=0.0, posinf=0.0, neginf=0.0)
-        attn_denom = torch.clamp(torch.sum(attention, dim=-1, keepdim=True), min=1e-6)
-        attention = attention / attn_denom
-
-        x = x.permute(0, 2, 1, 3).contiguous().view(batch_size, seq_len, self.hidden_dim)
-        x = self.fc_o(x)
-
-        kl_div = torch.tensor(0.0, device=x.device)
-        if HAS_NORMFLOWS and self.flow is not None and self.flow.nfm is not None:
-            try:
-                kl_div_raw = self.flow.reverse_kld(self.M)
-                if not (torch.isnan(kl_div_raw) or torch.isinf(kl_div_raw)):
-                    kl_div = torch.clamp(kl_div_raw, min=0.0, max=100.0) * self.n_heads * self.kl_lambda
-            except:
-                pass
-        return x, attention, kl_div
-
-
-class OursSharedKernelEncoderLayer(nn.Module):
-    def __init__(
-        self,
-        hidden_dim: int,
-        n_heads: int,
-        pf_dim: int,
-        M: int = 64,
-        dropout: float = 0.1,
-        device: str = 'cpu',
-        qk_mode: str = 'no_qk',
-        v_mode: str = 'fixed_orth',
-        freeze_qk: bool = False,
-        num_flows: int = 3,
-        flow_hidden_dim: int = 64,
-        num_mixtures: int = 10,
-        kl_lambda: float = 0.001,
-    ):
-        super().__init__()
-        self.self_attention = OursSharedKernelMultiHeadAttention(
-            hidden_dim=hidden_dim,
-            n_heads=n_heads,
-            M=M,
-            dropout=dropout,
-            device=device,
-            qk_mode=qk_mode,
-            v_mode=v_mode,
-            freeze_qk=freeze_qk,
-            num_flows=num_flows,
-            flow_hidden_dim=flow_hidden_dim,
-            num_mixtures=num_mixtures,
-            kl_lambda=kl_lambda,
-        )
-        self.feedforward = PositionwiseFeedforward(hidden_dim, pf_dim, dropout)
-        self.ln1 = nn.LayerNorm(hidden_dim)
-        self.ln2 = nn.LayerNorm(hidden_dim)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, src: torch.Tensor, mask: Optional[torch.Tensor] = None):
-        _src, attention, kl_div = self.self_attention(src, src, src, mask)
-        src = self.ln1(src + self.dropout(_src))
-        _src = self.feedforward(src)
-        src = self.ln2(src + self.dropout(_src))
-        return src, attention, kl_div
-
-
-class OursSharedKernelClassifier(BaseClassifier):
-    """Ours variant with one shared kernel network + head-id embedding."""
-
-    def __init__(
-        self,
-        vocab_size: int,
-        num_classes: int,
-        embed_dim: int = 128,
-        hidden_dim: int = 128,
-        n_heads: int = 4,
-        n_layers: int = 2,
-        pf_dim: int = 256,
-        M: int = 64,
-        dropout: float = 0.1,
-        max_seq_len: int = 256,
-        pad_idx: int = 0,
-        device: str = 'cpu',
-        qk_mode: str = 'no_qk',
-        v_mode: str = 'fixed_orth',
-        freeze_qk: bool = False,
-        num_flows: int = 3,
-        flow_hidden_dim: int = 64,
-        num_mixtures: int = 10,
-        kl_lambda: float = 0.001,
-        **kwargs
-    ):
-        super().__init__(
-            vocab_size=vocab_size,
-            num_classes=num_classes,
-            embed_dim=embed_dim,
-            hidden_dim=hidden_dim,
-            n_heads=n_heads,
-            n_layers=n_layers,
-            pf_dim=pf_dim,
-            dropout=dropout,
-            max_seq_len=max_seq_len,
-            pad_idx=pad_idx,
-            device=device,
-            **kwargs
-        )
-        self.M = M
-        self.qk_mode = qk_mode
-        self.v_mode = v_mode
-        self.freeze_qk = freeze_qk
-        self.shared_flow = True
-        self.num_flows = num_flows
-        self.flow_hidden_dim = flow_hidden_dim
-        self.num_mixtures = num_mixtures
-        self.kl_lambda = kl_lambda
-
-        self.layers = nn.ModuleList([
-            OursSharedKernelEncoderLayer(
-                hidden_dim=hidden_dim,
-                n_heads=n_heads,
-                pf_dim=pf_dim,
-                M=M,
-                dropout=dropout,
-                device=device,
-                qk_mode=qk_mode,
-                v_mode=v_mode,
-                freeze_qk=freeze_qk,
-                num_flows=num_flows,
-                flow_hidden_dim=flow_hidden_dim,
-                num_mixtures=num_mixtures,
-                kl_lambda=kl_lambda,
-            )
-            for _ in range(n_layers)
-        ])
-
-    def encode(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        x = self.embedding(input_ids)
-        x = self.pos_encoder(x)
-        x = self.input_projection(x)
-        mask = None
-        if attention_mask is not None:
-            mask = attention_mask.unsqueeze(1).unsqueeze(2)
-
-        total_kl_div = torch.tensor(0.0, device=x.device)
-        for layer in self.layers:
-            x, _, kl_div = layer(x, mask)
-            total_kl_div = total_kl_div + kl_div
         return x, total_kl_div
