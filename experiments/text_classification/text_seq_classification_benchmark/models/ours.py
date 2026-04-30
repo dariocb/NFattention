@@ -184,6 +184,8 @@ class OursMultiHeadAttention(nn.Module):
         if self.use_shared_kernel:
             self.head_embedding_q = nn.Embedding(n_heads, self.head_dim)
             self.head_embedding_k = nn.Embedding(n_heads, self.head_dim)
+            self.head_q_norm = nn.LayerNorm(self.head_dim)
+            self.head_k_norm = nn.LayerNorm(self.head_dim)
         
         # 如果 freeze_qk=True，冻结 Q 和 K
         if freeze_qk and self.qk_mode == 'normal':
@@ -315,8 +317,8 @@ class OursMultiHeadAttention(nn.Module):
             head_ids = torch.arange(self.n_heads, device=Q.device)
             head_emb_q = self.head_embedding_q(head_ids).view(1, self.n_heads, 1, self.head_dim)
             head_emb_k = self.head_embedding_k(head_ids).view(1, self.n_heads, 1, self.head_dim)
-            Q = Q + head_emb_q
-            K = K + head_emb_k
+            Q = self.head_q_norm(Q + head_emb_q)
+            K = self.head_k_norm(K + head_emb_k)
 
         # 计算 RFF 特征
         phi_Q = self.compute_rff_features(Q, omega1, omega2)

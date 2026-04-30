@@ -90,6 +90,7 @@ def get_model(model_name: str, **kwargs):
         "ours_latest_head_kernel": lambda **kw: OursClassifier(
             qk_mode='no_qk',
             v_mode='fixed_orth',
+            shared_flow=True,
             use_shared_kernel=True,
             freeze_qk=False,
             **kw
