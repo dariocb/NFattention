@@ -182,10 +182,8 @@ class OursMultiHeadAttention(nn.Module):
         self.scale = math.sqrt(self.head_dim)
 
         if self.use_shared_kernel:
-            self.head_embedding_q = nn.Embedding(n_heads, self.head_dim)
-            self.head_embedding_k = nn.Embedding(n_heads, self.head_dim)
-            self.head_q_norm = nn.LayerNorm(self.head_dim)
-            self.head_k_norm = nn.LayerNorm(self.head_dim)
+            self.head_embedding_q = nn.Embedding(n_heads, 2 * self.M)
+            self.head_embedding_k = nn.Embedding(n_heads, 2 * self.M)
         
         # 如果 freeze_qk=True，冻结 Q 和 K
         if freeze_qk and self.qk_mode == 'normal':
@@ -312,17 +310,17 @@ class OursMultiHeadAttention(nn.Module):
         # 从 Flow 采样 omega
         omega1, omega2 = self.sample_spectral_density(batch_size)
         
-        # Shared-kernel mode: condition all heads with head-id embedding.
-        if self.use_shared_kernel:
-            head_ids = torch.arange(self.n_heads, device=Q.device)
-            head_emb_q = self.head_embedding_q(head_ids).view(1, self.n_heads, 1, self.head_dim)
-            head_emb_k = self.head_embedding_k(head_ids).view(1, self.n_heads, 1, self.head_dim)
-            Q = self.head_q_norm(Q + head_emb_q)
-            K = self.head_k_norm(K + head_emb_k)
-
         # 计算 RFF 特征
         phi_Q = self.compute_rff_features(Q, omega1, omega2)
         phi_K = self.compute_rff_features(K, omega1, omega2)
+
+        # Shared-kernel mode: condition kernel features with head-id embedding.
+        if self.use_shared_kernel:
+            head_ids = torch.arange(self.n_heads, device=phi_Q.device)
+            head_emb_q = self.head_embedding_q(head_ids).view(1, self.n_heads, 1, 2 * self.M)
+            head_emb_k = self.head_embedding_k(head_ids).view(1, self.n_heads, 1, 2 * self.M)
+            phi_Q = phi_Q + head_emb_q
+            phi_K = phi_K + head_emb_k
         
         # 数值稳定修复：将特征映射到正域，避免分母符号翻转
         phi_Q_pos = torch.nn.functional.elu(phi_Q) + 1.0
