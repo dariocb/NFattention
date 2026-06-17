@@ -39,11 +39,13 @@ class ProgressReporter:
         self.current_experiment = 0
         self.start_time = time.time()
         self.experiment_times = []
+        self._epoch_durations: List[float] = []
         
     def start_experiment(self, dataset: str, model: str, seed: int, fold: Optional[int] = None):
         """开始新实验"""
         self.current_experiment += 1
         self.exp_start_time = time.time()
+        self._epoch_durations = []
         
         fold_str = f", Fold {fold+1}" if fold is not None else ""
         
@@ -74,11 +76,13 @@ class ProgressReporter:
         best_marker = " ⭐" if is_best else ""
         val_str = f", Val Acc: {val_acc:.4f}" if val_acc is not None else ""
         
-        # 预计本次实验剩余时间
+        # 预计本次实验剩余时间：用已完成 epoch 的平均耗时（避免单 epoch 抖动把 ETA 拉爆）
         if epoch_time > 0:
+            self._epoch_durations.append(float(epoch_time))
             remaining_epochs = total_epochs - epoch - 1
-            eta = epoch_time * remaining_epochs
-            eta_str = f" | ETA: {format_time(eta)}"
+            avg_epoch = float(np.mean(self._epoch_durations))
+            eta = avg_epoch * remaining_epochs
+            eta_str = f" | ETA: {format_time(eta)} (~{format_time(avg_epoch)}/ep)"
         else:
             eta_str = ""
         
@@ -448,7 +452,7 @@ def run_single_experiment(
 
     if model_name in {"ours_latest", "ours_latest_head_kernel"}:
         print(
-            "     Ours-family config: "
+            f"     {model_name} config: "
             f"qk_mode={getattr(model, 'qk_mode', 'unknown')}, "
             f"v_mode={getattr(model, 'v_mode', 'unknown')}, "
             f"shared_flow={getattr(model, 'shared_flow', 'unknown')}, "

@@ -19,26 +19,36 @@ except ImportError:
 
 
 class SpectralFlow(nn.Module):
-    """使用normflows实现的Normalizing Flow用于学习双变量谱密度"""
-    def __init__(self, dim, num_flows=3, hidden_dim=128, device='cpu', num_mixtures=10):
+    """使用normflows实现的Normalizing Flow用于学习双变量谱密度
+
+    新增参数 mlp_hidden_dim:
+      - None  -> 旧默认: RealNVP 内部 s/t MLP 宽度 = 2 * latent_size（重型）
+      - int   -> RealNVP 内部 s/t MLP 宽度 = mlp_hidden_dim（用于 Tiny-NF 等参数预算实验）
+    """
+    def __init__(self, dim, num_flows=3, hidden_dim=128, device='cpu', num_mixtures=4,
+                 mlp_hidden_dim=None):
         super().__init__()
         self.dim = dim  # 2*d (for bivariate: ω₁, ω₂)
         self.device = device
         self.num_mixtures = num_mixtures
-        
+        self.mlp_hidden_dim = mlp_hidden_dim
+
         if HAS_NORMFLOWS:
             # 使用normflows构建真正的可逆Flow
             torch.manual_seed(0)
             latent_size = dim
-            
+
+            # MLP 隐藏层宽度：None -> 保持旧默认 (2*latent_size)
+            mlp_hidden = mlp_hidden_dim if mlp_hidden_dim is not None else 2 * latent_size
+
             # 定义mask（用于MaskedAffineFlow）
             b = torch.Tensor([1 if i % 2 == 0 else 0 for i in range(latent_size)])
-            
+
             flows = []
             for i in range(num_flows):
                 # 定义s和t网络（用于仿射耦合层）
-                s = nf.nets.MLP([latent_size, 2 * latent_size, latent_size], init_zeros=True)
-                t = nf.nets.MLP([latent_size, 2 * latent_size, latent_size], init_zeros=True)
+                s = nf.nets.MLP([latent_size, mlp_hidden, latent_size], init_zeros=True)
+                t = nf.nets.MLP([latent_size, mlp_hidden, latent_size], init_zeros=True)
                 
                 if i % 2 == 0:
                     flows += [nf.flows.MaskedAffineFlow(b, t, s)]
@@ -117,7 +127,18 @@ class SpectralFlow(nn.Module):
 
 
 class FRSKAAttention(nn.Module):
-    """Flow-Regularized Spectral Kernel Attention"""
+    """Flow-Regularized Spectral Kernel Attention
+
+    Architecture options (via args.frska_architecture):
+      - "shared_full"  : 单一 NF 所有 head 共用 (paper Table 1 default 行为)
+      - "per_head_full": 每 head 独立 NF
+      - "hybrid"       : 共享 trunk + per-head tail (新)
+
+    Prior options (via args.frska_prior_type, hybrid 架构下有效):
+      - "ngsm" : 每 head 独立 trainable GaussianMixture (KL 拉过去)
+      - "rbf"  : 每 head 独立 DiagGaussian (相当于 trainable σ 的 RBF kernel)
+      - "none" : 不算 KL prior 项 (kl=0)
+    """
     def __init__(self, args, head_dim, n_heads, device, shared_flow=False, positive_feature_map=True):
         super().__init__()
         self.args = args
@@ -125,51 +146,96 @@ class FRSKAAttention(nn.Module):
         self.n_heads = n_heads
         self.M = args.M  # 随机特征数量
         self.device = device
-        self.shared_flow = shared_flow  # 是否共享Flow
+        self.shared_flow = shared_flow  # 是否共享Flow (仅用于 shared_full/per_head_full 兼容)
         self.positive_feature_map = positive_feature_map  # 是否使用ELU+1正特征映射稳定化
-        
-        if shared_flow:
+        self.num_flows = int(getattr(args, "frska_num_flows", 3))
+        self.num_mixtures = int(getattr(args, "frska_num_mixtures", 4))
+        # mlp_hidden_dim: None -> 旧默认（2*latent_size 重型 NF）
+        # 显式整数 (例如 16) -> Tiny-NF 配置
+        _mlp_hidden = getattr(args, "frska_mlp_hidden_dim", None)
+        self.mlp_hidden_dim = None if _mlp_hidden in (None, 0, -1) else int(_mlp_hidden)
+
+        # 架构选择：默认 shared_full 保持向后兼容
+        architecture = getattr(args, "frska_architecture", None)
+        if architecture is None:
+            # 兼容旧 shared_flow 参数
+            architecture = "shared_full" if shared_flow else "per_head_full"
+        self.architecture = architecture
+
+        # prior 类型：仅 hybrid 架构下生效（其他架构保留原有 NGSM 行为）
+        self.prior_type = getattr(args, "frska_prior_type", "ngsm")
+
+        # hybrid trunk 层数（其余为 per-head tail 层数）
+        self.trunk_layers = int(getattr(args, "frska_trunk_layers", 2))
+
+        if self.architecture == "hybrid":
+            self.flow = None
+            self.flows = None
+            self.hybrid_flow = HybridSpectralFlow(
+                dim=head_dim * 2,
+                n_heads=n_heads,
+                num_flows=self.num_flows,
+                trunk_layers=self.trunk_layers,
+                mlp_hidden_dim=self.mlp_hidden_dim if self.mlp_hidden_dim is not None else 2*(head_dim*2),
+                num_mixtures=self.num_mixtures,
+                prior_type=self.prior_type,
+                device=device,
+            )
+        elif self.architecture == "shared_full":
             # 共享一个Normalizing Flow（所有头共用）
             self.flow = SpectralFlow(
-                dim=head_dim * 2, 
-                num_flows=3,  # 3层
-                hidden_dim=128,  # 增加隐藏层维度
+                dim=head_dim * 2,
+                num_flows=self.num_flows,
+                hidden_dim=128,
                 device=device,
-                num_mixtures=10  # 10个混合成分
+                num_mixtures=self.num_mixtures,
+                mlp_hidden_dim=self.mlp_hidden_dim,
             )
             self.flows = None
-        else:
+            self.hybrid_flow = None
+        else:  # per_head_full
             # 每个头有独立的Normalizing Flow（完全独立的头）
-            # 使用nn.ModuleList为每个头创建独立的Flow
             self.flow = None
             self.flows = nn.ModuleList([
                 SpectralFlow(
-                    dim=head_dim * 2, 
-                    num_flows=3,  # 3层
-                    hidden_dim=128,  # 增加隐藏层维度
+                    dim=head_dim * 2,
+                    num_flows=self.num_flows,
+                    hidden_dim=128,
                     device=device,
-                    num_mixtures=10  # 10个混合成分
+                    num_mixtures=self.num_mixtures,
+                    mlp_hidden_dim=self.mlp_hidden_dim,
                 )
                 for _ in range(n_heads)
             ])
-        
+            self.hybrid_flow = None
+
         # 备用NGSM prior（如果normflows不可用）
         if not HAS_NORMFLOWS:
             self.ngsm_prior = None
         else:
             self.ngsm_prior = None  # 使用flow中的GaussianMixture
-        
+
         # 注意：不需要spectral_encoder，flow直接采样，不依赖于Q、K
         
     def sample_spectral_density(self, Q, K):
         """
         从flow中采样谱密度 ω₁, ω₂
-        如果shared_flow=True，所有头共享同一个Flow
-        如果shared_flow=False，每个头使用自己独立的Flow
+        如果架构是 hybrid，调用 HybridSpectralFlow
+        如果 shared_flow=True，所有头共享同一个 Flow
+        如果 shared_flow=False，每个头使用自己独立的Flow
         """
         batch_size, n_heads, seq_len, head_dim = Q.shape
-        
-        if self.shared_flow:
+
+        if self.architecture == "hybrid":
+            omega1, omega2 = self.hybrid_flow.sample_omegas(batch_size, self.M)
+            # 兼容旧接口返回 omega_flat_all（hybrid 下我们用 omega1/omega2 重组）
+            omega_flat_all = torch.cat([
+                omega1.reshape(-1, head_dim),
+                omega2.reshape(-1, head_dim)
+            ], dim=-1)  # 形状不严格，仅占位
+            return omega1, omega2, omega_flat_all
+
+        if self.architecture == "shared_full":
             # 共享Flow：所有头使用同一个Flow采样
             # 采样 n_heads * batch_size * M 个样本
             num_samples = n_heads * batch_size * self.M
@@ -279,9 +345,13 @@ class FRSKAAttention(nn.Module):
         
         return phi
     
-    def forward(self, Q, K, V, return_dense_attention=False):
+    def forward(self, Q, K, V, return_dense_attention=False, return_linear_denominator_raw=False):
         """
         Q, K, V: [batch, n_heads, seq_len, head_dim]
+
+        return_linear_denominator_raw:
+            若为 True，额外返回 clamp 前的线性注意力分母
+            D_i = φ̃(q_i)^T Σ_j φ̃(k_j)，形状 [batch, n_heads, seq_len]。
         """
         batch_size, n_heads, seq_len, head_dim = Q.shape
         
@@ -312,15 +382,25 @@ class FRSKAAttention(nn.Module):
         kv_summary = torch.einsum('bhlm,bhld->bhmd', phi_K_pos, V)   # [b, h, 2M, d]
         k_summary = torch.sum(phi_K_pos, dim=2)                      # [b, h, 2M]
         numerator = torch.einsum('bhlm,bhmd->bhld', phi_Q_pos, kv_summary)   # [b, h, l, d]
-        denominator = torch.einsum('bhlm,bhm->bhl', phi_Q_pos, k_summary)    # [b, h, l]
-        denominator = torch.clamp(denominator, min=1e-6).unsqueeze(-1)   # [b, h, l, 1]
-        context = numerator / denominator
+        denom_raw = torch.einsum('bhlm,bhm->bhl', phi_Q_pos, k_summary)    # [b, h, l]，clamp 前
+        denominator_safe = torch.clamp(denom_raw, min=1e-6).unsqueeze(-1)   # [b, h, l, 1]
+        context = numerator / denominator_safe
         
         # 计算KL散度（参考代码方式）
         kl_div = torch.tensor(0.0, device=Q.device)
-        
-        if HAS_NORMFLOWS:
-            if self.shared_flow:
+
+        if self.architecture == "hybrid":
+            # hybrid 架构：调用 HybridSpectralFlow 自己计算 KL
+            try:
+                kl_div_raw = self.hybrid_flow.reverse_kld(self.M)
+                if torch.isnan(kl_div_raw) or torch.isinf(kl_div_raw):
+                    kl_div = torch.tensor(0.0, device=Q.device)
+                else:
+                    kl_div = torch.clamp(kl_div_raw, min=0.0, max=100.0 * self.n_heads)
+            except Exception:
+                kl_div = torch.tensor(0.0, device=Q.device)
+        elif HAS_NORMFLOWS:
+            if self.architecture == "shared_full":
                 # 共享Flow：只计算一次KL，然后乘以头数（因为所有头共用）
                 if self.flow.nfm is not None:
                     try:
@@ -359,7 +439,9 @@ class FRSKAAttention(nn.Module):
             dense_scores = torch.nan_to_num(dense_scores, nan=0.0, posinf=0.0, neginf=0.0)
             dense_denom = torch.clamp(torch.sum(dense_scores, dim=-1, keepdim=True), min=1e-6)
             attention = dense_scores / dense_denom
-        
+
+        if return_linear_denominator_raw:
+            return context, attention, kl_div, denom_raw
         return context, attention, kl_div
 
 
@@ -471,6 +553,35 @@ class FRSKAMultiHeadAttention(nn.Module):
         # 冻结参数
         self.fc_v.weight.requires_grad = False
         self.fc_v.bias.requires_grad = False
+
+    def compute_linear_denominator_raw(self, query, key, value):
+        """与 forward 相同的 Q/K/V 构造，返回线性注意力分母（clamp 前），形状 [B, H, L]。"""
+        batch_size = query.shape[0]
+        maxlen = query.shape[1]
+
+        if self.qk_mode == 'normal':
+            Q = self.fc_q(query)
+            K = self.fc_k(key)
+        else:
+            Q = query
+            K = key
+
+        if self.v_mode == 'learnable':
+            V = self.fc_v(value)
+        else:
+            V_fixed = torch.einsum('bsd,hdk->bshk', value, self.fixed_v_weights)
+
+        Q = Q.view(batch_size, maxlen, self.n_heads, self.head_dim).permute(0, 2, 1, 3)
+        K = K.view(batch_size, maxlen, self.n_heads, self.head_dim).permute(0, 2, 1, 3)
+        if self.v_mode == 'learnable':
+            V = V.view(batch_size, maxlen, self.n_heads, self.head_dim).permute(0, 2, 1, 3)
+        else:
+            V = V_fixed.permute(0, 2, 1, 3).contiguous()
+
+        _, _, _, denom_raw = self.frska_attention(
+            Q, K, V, return_linear_denominator_raw=True
+        )
+        return denom_raw
         
     def forward(self, query, key, value):
         batch_size = query.shape[0]
@@ -519,8 +630,193 @@ class FRSKAMultiHeadAttention(nn.Module):
         # 重塑回原始形状
         x = x.permute(0, 2, 1, 3).contiguous()
         x = x.view(batch_size, -1, self.args.KEY_DIM)
-        
+
         x = self.fc_o(x)
-        
+
         return x, attention, kl_div
 
+
+# ============================================================================
+# HybridSpectralFlow: trunk shared across heads + per-head tail + per-head prior
+# ============================================================================
+class HybridSpectralFlow(nn.Module):
+    """混合架构的 Normalizing Flow：
+
+    结构:
+        z ~ N(0, I)
+          |
+          ▼
+        shared trunk  (trunk_layers 个 RealNVP coupling layers)  ← 所有 head 共享
+          |
+          ▼
+        head_h tail   (num_flows - trunk_layers 个 coupling layers) ← 每 head 独立
+          |
+          ▼
+        ω^(h) ~ p_{θ_h}(ω)
+
+    prior:
+      - "ngsm" : 每 head 独立 GaussianMixture (trainable loc/scale/weights)
+      - "rbf"  : 每 head 独立 DiagGaussian   (trainable loc + log_scale → 等价于 trainable σ 的 RBF)
+      - "none" : 不实例化 prior，KL 项始终为 0
+    """
+
+    def __init__(
+        self,
+        dim,
+        n_heads,
+        num_flows=3,
+        trunk_layers=2,
+        mlp_hidden_dim=16,
+        num_mixtures=10,
+        prior_type="ngsm",
+        device="cpu",
+    ):
+        super().__init__()
+        self.dim = dim
+        self.n_heads = n_heads
+        self.num_flows = num_flows
+        self.trunk_layers = trunk_layers
+        self.tail_layers = num_flows - trunk_layers
+        if self.tail_layers < 1:
+            raise ValueError(
+                f"trunk_layers ({trunk_layers}) must be < num_flows ({num_flows}), "
+                f"got tail_layers={self.tail_layers}"
+            )
+        self.mlp_hidden_dim = mlp_hidden_dim
+        self.num_mixtures = num_mixtures
+        self.prior_type = prior_type
+        self.device = device
+
+        if not HAS_NORMFLOWS:
+            raise RuntimeError("HybridSpectralFlow requires normflows.")
+
+        # base distribution: standard Gaussian (shared, no params)
+        self.q0 = nf.distributions.DiagGaussian(dim)
+        # freeze q0 to be standard normal
+        for p in self.q0.parameters():
+            p.requires_grad = False
+
+        # alternating coupling mask
+        b = torch.tensor([1.0 if i % 2 == 0 else 0.0 for i in range(dim)])
+        self.register_buffer("_mask", b)
+
+        # ---------- shared trunk ----------
+        trunk = []
+        for i in range(trunk_layers):
+            mask_i = b if i % 2 == 0 else 1 - b
+            s = nf.nets.MLP([dim, mlp_hidden_dim, dim], init_zeros=True)
+            t = nf.nets.MLP([dim, mlp_hidden_dim, dim], init_zeros=True)
+            trunk.append(nf.flows.MaskedAffineFlow(mask_i, t, s))
+            trunk.append(nf.flows.ActNorm(dim))
+        self.trunk_flows = nn.ModuleList(trunk)
+
+        # ---------- per-head tail ----------
+        self.head_tails = nn.ModuleList()
+        for h in range(n_heads):
+            tail = []
+            for j in range(self.tail_layers):
+                # mask continues alternating from trunk's last index
+                idx = trunk_layers + j
+                mask_j = b if idx % 2 == 0 else 1 - b
+                s = nf.nets.MLP([dim, mlp_hidden_dim, dim], init_zeros=True)
+                t = nf.nets.MLP([dim, mlp_hidden_dim, dim], init_zeros=True)
+                tail.append(nf.flows.MaskedAffineFlow(mask_j, t, s))
+                tail.append(nf.flows.ActNorm(dim))
+            self.head_tails.append(nn.ModuleList(tail))
+
+        # ---------- per-head prior ----------
+        if prior_type == "ngsm":
+            self.head_priors = nn.ModuleList([
+                nf.distributions.GaussianMixture(
+                    n_modes=num_mixtures, dim=dim, trainable=True
+                )
+                for _ in range(n_heads)
+            ])
+        elif prior_type == "rbf":
+            # DiagGaussian (loc + log_scale) ≡ RBF kernel 的谱密度（trainable σ）
+            self.head_priors = nn.ModuleList([
+                nf.distributions.DiagGaussian(dim)  # trainable by default
+                for _ in range(n_heads)
+            ])
+        elif prior_type == "none":
+            self.head_priors = None
+        else:
+            raise ValueError(f"Unknown prior_type: {prior_type}")
+
+        self.to(device)
+
+    # ------------------------------------------------------------------
+    def _forward_chain(self, z, flows):
+        """通过一段 flow chain (ModuleList of nf.flows)，返回 (输出, sum log_det)"""
+        log_det = torch.zeros(z.shape[0], device=z.device, dtype=z.dtype)
+        for flow in flows:
+            z, ld = flow(z)
+            # ActNorm 返回 0-dim log_det，对齐到 batch
+            if ld.dim() == 0:
+                ld = ld.expand(z.shape[0])
+            log_det = log_det + ld
+        return z, log_det
+
+    # ------------------------------------------------------------------
+    def sample_omegas(self, batch_size, M):
+        """
+        返回 (omega1, omega2)，形状 [B, H, M, D/2]，其中 D = self.dim
+
+        每 head 独立采样：先共用 trunk，然后过 head_h 的 tail
+        """
+        device = next(self.parameters()).device
+        n = self.n_heads * batch_size * M
+        # base sample 一次
+        z, _ = self.q0(n)         # [n, D]
+        z = z.to(device)
+        # trunk: shared
+        z_trunk, _ = self._forward_chain(z, self.trunk_flows)
+        # split into n_heads groups
+        z_trunk = z_trunk.view(self.n_heads, batch_size * M, self.dim)
+        omega_per_head = []
+        for h in range(self.n_heads):
+            z_h, _ = self._forward_chain(z_trunk[h], self.head_tails[h])
+            omega_per_head.append(z_h)
+        omega = torch.stack(omega_per_head, dim=0)  # [H, B*M, D]
+        omega = omega.view(self.n_heads, batch_size, M, self.dim)
+        # to [B, H, M, D]
+        omega = omega.permute(1, 0, 2, 3).contiguous()
+        # numerical sanity
+        omega = torch.clamp(omega, min=-10.0, max=10.0)
+        if torch.isnan(omega).any():
+            omega = torch.randn_like(omega) * 0.5
+        omega1, omega2 = torch.chunk(omega, chunks=2, dim=-1)
+        return omega1, omega2
+
+    # ------------------------------------------------------------------
+    def reverse_kld(self, M):
+        """
+        reverse KL = E_{p_θ}[log p_θ(ω) - log prior(ω)]
+        对每 head 独立估计，加和返回
+
+        p_θ(ω) = q0(z) * |det J|^{-1} (change of variables)
+        log p_θ(ω) = log q0(z) - sum log_det (forward Jacobian)
+        """
+        if self.prior_type == "none" or self.head_priors is None:
+            return torch.tensor(0.0, device=next(self.parameters()).device)
+
+        device = next(self.parameters()).device
+        total_kl = torch.tensor(0.0, device=device)
+
+        for h in range(self.n_heads):
+            # sample M latent points
+            z, log_q0 = self.q0(M)
+            z = z.to(device)
+            log_q0 = log_q0.to(device)
+            # forward through trunk then head_h tail
+            z_trunk, ld_trunk = self._forward_chain(z, self.trunk_flows)
+            z_head, ld_head = self._forward_chain(z_trunk, self.head_tails[h])
+            # log p_θ(ω) = log q0(z) - sum log_det
+            log_p_theta = log_q0 - ld_trunk - ld_head
+            log_prior = self.head_priors[h].log_prob(z_head)
+            kl_h = (log_p_theta - log_prior).mean()
+            if torch.isnan(kl_h) or torch.isinf(kl_h):
+                continue
+            total_kl = total_kl + kl_h
+
+        return total_kl
