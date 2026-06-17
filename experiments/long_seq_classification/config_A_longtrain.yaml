@@ -1,0 +1,82 @@
+datasets:
+- enabled: true
+  name: rt_polarity
+  use_cv: true
+- enabled: true
+  name: sst2
+  use_cv: false
+- enabled: true
+  name: sst5
+  use_cv: false
+- enabled: true
+  name: trec
+  use_cv: false
+- enabled: true
+  name: ag_news
+  use_cv: false
+- enabled: true
+  name: dbpedia
+  use_cv: false
+- enabled: true
+  name: yelp_review_full
+  use_cv: false
+evaluation:
+  additional_metrics:
+  - f1_macro
+  primary_metric: accuracy
+experiment:
+  n_folds: 10
+  name: text_seq_classification
+  output_dir: results
+  seeds:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  use_cv: true
+logging:
+  level: INFO
+  save_model: true
+  save_predictions: false
+model_params:
+  M: 64
+  att_dropout: 0.1
+  copula_lambda: 0.001
+  dropout: 0.1
+  embed_dim: 128
+  hidden_dim: 128
+  kl_lambda: 0.001
+  max_seq_len: 1024
+  n_dims: 64
+  n_features: 64
+  n_heads: 4
+  n_layers: 2
+  orthogonal: false
+  p_norm: 2
+  pf_dim: 256
+  prior_var: 1.0
+models:
+- enabled: true
+  name: transformer
+- enabled: true
+  name: mikan
+- enabled: true
+  name: performer
+- enabled: true
+  name: rka
+- enabled: true
+  name: gmm_rks
+- enabled: true
+  name: ours_fixed_qk
+- enabled: true
+  name: ours_trainable_qk
+training:
+  batch_size: 32
+  gradient_clip: 1.0
+  learning_rate: 0.001
+  n_epochs: 200
+  patience: 200
+  scheduler: cosine
+  warmup_epochs: 5
+  weight_decay: 0.0001

@@ -1,0 +1,84 @@
+experiment:
+  name: text_seq_classification
+  seeds:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  use_cv: true
+  n_folds: 10
+  output_dir: results
+datasets:
+- name: rt_polarity
+  enabled: true
+  use_cv: true
+- name: sst2
+  enabled: true
+  use_cv: false
+- name: sst5
+  enabled: true
+  use_cv: false
+- name: trec
+  enabled: true
+  use_cv: false
+- name: ag_news
+  enabled: true
+  use_cv: false
+- name: dbpedia
+  enabled: true
+  use_cv: false
+- name: yelp_review_full
+  enabled: true
+  use_cv: false
+models:
+- name: transformer
+  enabled: true
+- name: mikan
+  enabled: true
+- name: performer
+  enabled: true
+- name: rka
+  enabled: true
+- name: gmm_rks
+  enabled: true
+- name: ours_fixed_qk
+  enabled: true
+- name: ours_trainable_qk
+  enabled: true
+model_params:
+  embed_dim: 128
+  hidden_dim: 128
+  n_heads: 4
+  n_layers: 2
+  pf_dim: 256
+  dropout: 0.3
+  max_seq_len: 1024
+  M: 64
+  n_features: 64
+  n_dims: 64
+  prior_var: 1.0
+  kl_lambda: 0.001
+  copula_lambda: 0.001
+  att_dropout: 0.3
+  p_norm: 2
+  orthogonal: false
+  num_flows: 3
+  flow_hidden_dim: 64
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.001
+  n_epochs: 50
+  patience: 10
+  scheduler: cosine
+  warmup_epochs: 5
+  gradient_clip: 1.0
+evaluation:
+  primary_metric: accuracy
+  additional_metrics:
+  - f1_macro
+logging:
+  level: INFO
+  save_model: true
+  save_predictions: false
