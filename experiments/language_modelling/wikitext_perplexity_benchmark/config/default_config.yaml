@@ -1,0 +1,71 @@
+# Default configuration for the WikiText perplexity benchmark.
+
+experiment:
+  name: "wikitext_perplexity"
+  seeds: [0, 1, 2]
+  output_dir: "results"
+
+dataset:
+  name: "wikitext"
+  config_name: "wikitext-103-v1"
+  block_size: 512
+  tokenizer_embeddings_model: "gpt2"
+  cache_dir: "data"
+
+models:
+  - name: "transformer"
+    enabled: true
+  - name: "mikan"
+    enabled: true
+  - name: "performer"
+    enabled: true
+  - name: "rka"
+    enabled: true
+  - name: "gmm_rks"
+    enabled: true
+  - name: "ours_shared_ngsm"
+    enabled: true
+  - name: "ours_hybrid_noprior"
+    enabled: true
+  - name: "ours_hybrid_ngsm"
+    enabled: true
+  - name: "ours_hybrid_rbf"
+    enabled: true
+
+model_params:
+  embed_dim: 256
+  hidden_dim: 256
+  n_heads: 8
+  n_layers: 4
+  pf_dim: 512
+  dropout: 0.1
+  max_seq_len: 512
+  M: 64
+  n_features: 64
+  n_dims: 64
+  kl_lambda: 0.001
+  num_flows: 3
+  flow_hidden_dim: 64
+  num_mixtures: 10
+  architecture: "hybrid"
+  prior_type: "ngsm"
+  trunk_layers: 2
+  mlp_hidden_dim: 16
+  shared_flow: true
+  use_shared_kernel: false
+  freeze_qk: false
+  qk_mode: "no_qk"
+  v_mode: "fixed_orth"
+  orthogonal: false
+
+training:
+  batch_size: 8
+  learning_rate: 0.0005
+  weight_decay: 0.0001
+  n_epochs: 10
+  gradient_clip: 1.0
+  eval_every_epochs: 1
+  num_workers: 4
+
+evaluation:
+  pad_token_id: 0
