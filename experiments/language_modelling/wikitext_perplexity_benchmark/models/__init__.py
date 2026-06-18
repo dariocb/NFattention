@@ -25,14 +25,13 @@ def get_model(model_name: str, **kwargs):
         "performer": PerformerLM,
         "rka": RKALM,
         "gmm_rks": GMMRKSLM,
-        "ours_latest": lambda **kw: OursLM(architecture="hybrid", prior_type="ngsm", **kw),
-        "ours_shared_ngsm": lambda **kw: OursLM(architecture="shared_full", prior_type="ngsm", **kw),
-        "ours_hybrid_noprior": lambda **kw: OursLM(architecture="hybrid", prior_type="none", **kw),
-        "ours_hybrid_ngsm": lambda **kw: OursLM(architecture="hybrid", prior_type="ngsm", **kw),
-        "ours_hybrid_rbf": lambda **kw: OursLM(architecture="hybrid", prior_type="rbf", **kw),
+        "ours_latest": lambda **kw: OursLM(**{**kw, "architecture": "hybrid", "prior_type": "ngsm"}),
+        "ours_shared_ngsm": lambda **kw: OursLM(**{**kw, "architecture": "shared_full", "prior_type": "ngsm"}),
+        "ours_hybrid_noprior": lambda **kw: OursLM(**{**kw, "architecture": "hybrid", "prior_type": "none"}),
+        "ours_hybrid_ngsm": lambda **kw: OursLM(**{**kw, "architecture": "hybrid", "prior_type": "ngsm"}),
+        "ours_hybrid_rbf": lambda **kw: OursLM(**{**kw, "architecture": "hybrid", "prior_type": "rbf"}),
     }
     if model_name not in model_map:
         raise ValueError(f"Unsupported model: {model_name}. Available: {list(model_map.keys())}")
     model_cls = model_map[model_name]
     return model_cls(**kwargs) if callable(model_cls) and not isinstance(model_cls, type) else model_cls(**kwargs)
-
