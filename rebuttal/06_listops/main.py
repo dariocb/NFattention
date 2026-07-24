@@ -75,6 +75,8 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--primary-seeds", default="0,1,2,3,4")
     parser.add_argument("--ablation-seeds", default="0,1,2")
+    parser.add_argument("--primary-variants", default="")
+    parser.add_argument("--ablation-variants", default="")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--steps", type=int, default=5000)
     parser.add_argument("--microbatch", type=int, default=4)
@@ -134,6 +136,17 @@ def main() -> int:
             "feature_width": 256,
         },
     ]
+    def select_variants(variants, requested, label):
+        names = [value.strip() for value in requested.split(",") if value.strip()]
+        if not names:
+            return variants
+        known = {variant["name"] for variant in variants}
+        unknown = sorted(set(names) - known)
+        if unknown:
+            raise ValueError(f"Unknown {label} variant(s): {unknown}")
+        return [variant for variant in variants if variant["name"] in names]
+    primary_variants = select_variants(primary_variants, args.primary_variants, "primary")
+    ablation_variants = select_variants(ablation_variants, args.ablation_variants, "ablation")
     config = {
         "experiment": "listops",
         "dataset": bundle.manifest(),
@@ -161,6 +174,7 @@ def main() -> int:
     (args.output_dir / "histories").mkdir(parents=True, exist_ok=True)
     (args.output_dir / "predictions").mkdir(parents=True, exist_ok=True)
     (args.output_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
+    (args.output_dir / "progress").mkdir(parents=True, exist_ok=True)
 
     grids = [
         ("primary", primary_variants, primary_seeds),
@@ -175,6 +189,12 @@ def main() -> int:
                     "seed": seed,
                 }
                 try:
+                    progress_path = args.output_dir / "progress" / f"{variant['name']}__seed{seed}.json"
+                    checkpoint_path = args.output_dir / "checkpoints" / f"{variant['name']}__seed{seed}__latest.pt"
+                    def on_validation(row, live_model, improved):
+                        write_json(progress_path, {**context, "status": "running", **row})
+                        if improved:
+                            torch.save({"state_dict": live_model.state_dict(), "step": int(row["step"]), "seed": seed}, checkpoint_path)
                     loaders = make_loaders(
                         bundle,
                         max_length=max_length,
@@ -228,6 +248,7 @@ def main() -> int:
                         device,
                         seed,
                         bundle.num_classes,
+                        on_validation=on_validation,
                     )
                     test = result["selections"]["accuracy"]["test"]
                     peak_allocated = (

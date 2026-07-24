@@ -8,7 +8,7 @@ import math
 import random
 import time
 from dataclasses import asdict, dataclass
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -131,6 +131,7 @@ def train_model(
     train_config: TrainConfig,
     device: torch.device,
     num_classes: int,
+    on_validation: Optional[Callable[[Dict[str, float], SequenceClassifier, bool], None]] = None,
 ) -> Dict[str, object]:
     model.to(device)
     optimizer = _make_optimizer(model, train_config)
@@ -172,6 +173,8 @@ def train_model(
                 best_steps[metric] = global_step
                 if metric == train_config.selection_metrics[0]:
                     improved_primary = True
+        if on_validation is not None:
+            on_validation(row, model, improved_primary)
         stale_evaluations = 0 if improved_primary else stale_evaluations + 1
         model.train()
         return improved_primary
@@ -274,6 +277,7 @@ def run_training(
     device: torch.device,
     seed: int,
     num_classes: int,
+    on_validation: Optional[Callable[[Dict[str, float], SequenceClassifier, bool], None]] = None,
 ) -> Tuple[SequenceClassifier, Dict[str, object]]:
     set_seed(seed)
     model = build_model(model_config)
@@ -287,7 +291,7 @@ def run_training(
         for layer in model.layers
         if hasattr(layer.attention, "density")
     ]
-    result = train_model(model, loaders, train_config, device, num_classes)
+    result = train_model(model, loaders, train_config, device, num_classes, on_validation)
     result["density_checksums_initial"] = initial_density_checksums
     result["density_checksums_final"] = [
         layer.attention.density.checksum()

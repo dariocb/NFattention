@@ -97,7 +97,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--lengths", default="256,512,1024,2000,4096")
+    parser.add_argument(
+        "--lengths",
+        default="128,256,512,1024,2048,4096,8192,16384,32768",
+    )
     parser.add_argument("--warmups", type=int, default=20)
     parser.add_argument("--blocks", type=int, default=5)
     parser.add_argument("--iterations", type=int, default=50)
@@ -120,6 +123,7 @@ def main() -> int:
         "blocks": args.blocks,
         "iterations": args.iterations,
         "dtype": "float32",
+        "parameter_disclosure": "Counts are reported per row; adapters are not parameter-matched.",
     }
     writer = ResultWriter(args.output_dir, config)
     rows: List[Dict[str, object]] = []
@@ -260,6 +264,8 @@ def main() -> int:
             "training_median_ms",
             "inference_tokens_per_second",
             "peak_allocated_bytes",
+            "trainable_parameters",
+            "total_parameters",
         ],
     )
     try:

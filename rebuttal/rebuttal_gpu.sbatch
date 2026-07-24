@@ -19,7 +19,7 @@
 set -euo pipefail
 
 # Step 2: Require an explicit work mode from the submission script.
-: "${MODE:?Submit with MODE=smoke,01,02,03,04,05,06p,or 06a}"
+: "${MODE:?Submit with MODE=smoke,01,02,03,04,05,06p,06a,or 06cal}"
 
 # Step 3: Load the same Python module used to create the virtual environment.
 module purge
@@ -144,40 +144,57 @@ print('ListOps:', load_listops(root / 'listops', download=True).manifest())
         export PYTHON=python
         export CUDA_DEVICE=cuda:0
         export OUTPUT_DIR="${TASK_OUTPUT}"
-        export SEQ_LENGTHS=256,512,1024,2000,4096
+        # Use the log-spaced default declared in 05_efficiency/run.sh.
         export SKIP_SMOKE=1
 
         bash rebuttal/05_efficiency/run.sh
         ;;
 
     06p)
-        # Run all four primary ListOps models for one seed. Passing an empty
-        # ablation seed list prevents duplicate ablation work in this task.
+        # One primary variant/seed per GPU task (4 variants x 5 seeds).
+        LISTOPS_VARIANT_INDEX=$(( TASK_ID / 5 ))
+        LISTOPS_SEED=$(( TASK_ID % 5 ))
+        PRIMARY_VARIANTS=(transformer performer rka fska_main)
         python rebuttal/06_listops/main.py \
             --device cuda:0 \
-            --primary-seeds "${TASK_ID}" \
+            --primary-seeds "${LISTOPS_SEED}" \
             --ablation-seeds "" \
+            --primary-variants "${PRIMARY_VARIANTS[${LISTOPS_VARIANT_INDEX}]}" \
             --steps 5000 \
-            --microbatch 4 \
-            --gradient-accumulation 8 \
+            --microbatch "${LISTOPS_MICROBATCH:-8}" \
+            --gradient-accumulation "${LISTOPS_GRADIENT_ACCUMULATION:-4}" \
             --no-download \
             --data-dir "${DATA_ROOT}/listops" \
             --output-dir "${TASK_OUTPUT}"
         ;;
 
     06a)
-        # Run all focused ListOps ablations for one seed. Passing an empty
-        # primary list prevents duplicate primary-model work in this task.
+        # One ablation variant/seed per GPU task (5 variants x 3 seeds).
+        LISTOPS_VARIANT_INDEX=$(( TASK_ID / 3 ))
+        LISTOPS_SEED=$(( TASK_ID % 3 ))
+        ABLATION_VARIANTS=(fska_fixed_bivariate fska_raw_rff fska_learned_qk fska_m32 fska_m128)
         python rebuttal/06_listops/main.py \
             --device cuda:0 \
             --primary-seeds "" \
-            --ablation-seeds "${TASK_ID}" \
+            --ablation-seeds "${LISTOPS_SEED}" \
+            --ablation-variants "${ABLATION_VARIANTS[${LISTOPS_VARIANT_INDEX}]}" \
             --steps 5000 \
-            --microbatch 4 \
-            --gradient-accumulation 8 \
+            --microbatch "${LISTOPS_MICROBATCH:-8}" \
+            --gradient-accumulation "${LISTOPS_GRADIENT_ACCUMULATION:-4}" \
             --no-download \
             --data-dir "${DATA_ROOT}/listops" \
             --output-dir "${TASK_OUTPUT}"
+        ;;
+
+    06cal)
+        # One true 2,000-token FSKA step for memory calibration. Submit
+        # separate LISTOPS_MICROBATCH values before the final 06 arrays.
+        python rebuttal/06_listops/main.py \
+            --device cuda:0 --primary-seeds 0 --ablation-seeds "" \
+            --primary-variants fska_main --steps 1 \
+            --microbatch "${LISTOPS_MICROBATCH:?Set LISTOPS_MICROBATCH}" \
+            --gradient-accumulation 1 --eval-every 1 --no-download \
+            --data-dir "${DATA_ROOT}/listops" --output-dir "${TASK_OUTPUT}"
         ;;
 
     *)

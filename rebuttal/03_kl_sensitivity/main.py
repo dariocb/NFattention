@@ -17,7 +17,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     add_common_arguments(parser)
     args = parser.parse_args()
-    weights = [0.0, 1e-4, 1e-3, 5e-3, 1e-2]
+    # Extend above the paper default (1e-3) on a log scale to distinguish a
+    # plateau from over-regularisation.
+    weights = [0.0, 1e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1]
     variants = [
         {
             "name": f"lambda_{weight:g}",

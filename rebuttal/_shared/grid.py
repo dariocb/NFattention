@@ -34,9 +34,17 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--revision", default=None)
     parser.add_argument("--smoke", action="store_true")
-    parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--patience", type=int, default=10)
+    # Locked paper-text architecture. These values are never selected on test data.
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--patience", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--learning-rate", type=float, default=1e-3)
+    parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument("--hidden-dim", type=int, default=128)
+    parser.add_argument("--n-heads", type=int, default=4)
+    parser.add_argument("--n-layers", type=int, default=2)
+    parser.add_argument("--ff-dim", type=int, default=256)
+    parser.add_argument("--dropout", type=float, default=0.1)
 
 
 def resolve_device(value: str) -> torch.device:
@@ -120,8 +128,9 @@ def run_sst_grid(
             "epochs": epochs,
             "patience": patience,
             "batch_size": args.batch_size,
-            "learning_rate": 1e-3,
-            "weight_decay": 1e-4,
+            "learning_rate": args.learning_rate,
+            "weight_decay": args.weight_decay,
+            "architecture": {"hidden_dim": args.hidden_dim, "n_heads": args.n_heads, "n_layers": args.n_layers, "ff_dim": args.ff_dim, "dropout": args.dropout, "max_length": max_length},
         },
     }
     writer = ResultWriter(args.output_dir, config)
@@ -151,11 +160,11 @@ def run_sst_grid(
                     vocab_size=len(loaders.vocabulary.token_to_id),
                     num_classes=bundle.num_classes,
                     max_length=max_length,
-                    hidden_dim=32 if args.smoke else 128,
-                    n_heads=4,
-                    n_layers=1 if args.smoke else 2,
-                    ff_dim=64 if args.smoke else 256,
-                    dropout=0.0 if args.smoke else 0.1,
+                    hidden_dim=32 if args.smoke else args.hidden_dim,
+                    n_heads=4 if args.smoke else args.n_heads,
+                    n_layers=1 if args.smoke else args.n_layers,
+                    ff_dim=64 if args.smoke else args.ff_dim,
+                    dropout=0.0 if args.smoke else args.dropout,
                     feature_width=int(variant.get("feature_width", 128)),
                     num_spectral_pairs=int(variant.get("num_spectral_pairs", 64)),
                     density_mode=str(variant.get("density_mode", "learned_flow")),
@@ -166,8 +175,8 @@ def run_sst_grid(
                     sample_seed=1729 + seed,
                 )
                 train_config = TrainConfig(
-                    learning_rate=1e-3,
-                    weight_decay=1e-4,
+                    learning_rate=args.learning_rate,
+                    weight_decay=args.weight_decay,
                     max_epochs=epochs,
                     patience=patience,
                     selection_metrics=("loss", "accuracy", "macro_f1"),

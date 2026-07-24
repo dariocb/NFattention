@@ -178,15 +178,15 @@ J05="$(sbatch --parsable \
     --export=ALL,MODE=05 \
     "${WORKER}")"
 
-# Step 11: Submit ListOps as separate primary and ablation seed arrays.
-# These jobs receive a longer default limit because each task trains several
-# models for 5,000 optimizer steps.
+# Step 11: Submit one ListOps model/seed per GPU task. This removes serial
+# variants within an allocation, allowing Slurm to use every idle GPU and
+# making each completed result independently visible.
 LISTOPS_TIME="${LISTOPS_TIME:-2-00:00:00}"
 echo "Submitting ListOps arrays with time limit ${LISTOPS_TIME}."
 J06_PRIMARY="$(sbatch --parsable \
     --job-name=fska_06_primary \
     --dependency="${DEPENDENCY}" \
-    --array=0-4 \
+    --array=0-19 \
     --time="${LISTOPS_TIME}" \
     --export=ALL,MODE=06p \
     "${WORKER}")"
@@ -194,7 +194,7 @@ J06_PRIMARY="$(sbatch --parsable \
 J06_ABLATION="$(sbatch --parsable \
     --job-name=fska_06_ablation \
     --dependency="${DEPENDENCY}" \
-    --array=0-2 \
+    --array=0-14 \
     --time="${LISTOPS_TIME}" \
     --export=ALL,MODE=06a \
     "${WORKER}")"

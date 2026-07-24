@@ -13,8 +13,10 @@ DATA_ROOT="${DATA_DIR:-${REPO_ROOT}/rebuttal/data/listops}"
 RUN_ID="${RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 RESULT_ROOT="${OUTPUT_DIR:-${SCRIPT_DIR}/outputs/${RUN_ID}}"
 STEP_COUNT="${STEPS:-5000}"
-MICROBATCH_SIZE="${MICROBATCH:-4}"
-ACCUMULATION="${GRADIENT_ACCUMULATION:-8}"
+# A40 calibration begins at 8x4 (= effective batch 32).  The Slurm 06cal
+# preflight can establish whether 16x2 is also safe before final submission.
+MICROBATCH_SIZE="${MICROBATCH:-8}"
+ACCUMULATION="${GRADIENT_ACCUMULATION:-4}"
 
 "${PYTHON_BIN}" -c "import torch, sklearn, normflows"
 if [[ "${SKIP_SMOKE:-0}" != "1" ]]; then
@@ -31,4 +33,3 @@ fi
   --gradient-accumulation "${ACCUMULATION}" \
   --data-dir "${DATA_ROOT}" \
   --output-dir "${RESULT_ROOT}"
-

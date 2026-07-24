@@ -584,6 +584,87 @@ rather than the smaller sentence-classification encoder.
 | `06_listops/fska_m32` | Identity Q/K with 32 spectral pairs |
 | `06_listops/fska_m128` | Identity Q/K with 128 spectral pairs |
 
+## Final execution protocol update
+
+The final runs use a locked, paper-aligned protocol. It is deliberately not
+described as test-tuned: any selection is made from validation behaviour, and
+the test set is evaluated only after checkpoint selection.
+
+### SST-5 final budget (`01`--`04`)
+
+The common SST-5 architecture remains hidden size 128, four heads, two
+encoder layers, FFN size 256, dropout 0.1, maximum length 256, masked-mean
+pooling, 64 spectral pairs, batch size 32, Adam learning rate 1e-3, and
+weight decay 1e-4. The final budget is now at most 100 epochs with
+validation-loss patience 20. Complete per-seed training histories are written
+under `histories/` for every SST-5 module, including CE, raw/weighted KL and
+validation metrics where applicable.
+
+This is a controlled, scratch-trained text protocol. It supports a fair
+comparison between the four local adapters; it is not a claim of a
+pretrained SST-5 state-of-the-art result.
+
+### KL grid (`03`)
+
+The predeclared sensitivity grid is now:
+
+```text
+lambda = 0, 1e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1
+```
+
+The added values test one and two orders of magnitude above the paper default
+of `1e-3`. If validation performance is still flat at `1e-1`, any extension
+must be decided from validation curves before looking at test performance.
+
+`lambda=0` is an informative stability condition. Removing the reverse-KL
+term removes the direct constraint that keeps the learned RealNVP density near
+the frozen spectral-mixture prior. Cross-entropy gradients can then drive a
+flow scale to a numerically extreme value, at which point sampled spectral
+frequencies become non-finite. The code fails explicitly before clamping such
+a sample; this is an empirical failure mode to report, not a score to omit.
+
+### Efficiency (`05`)
+
+The final isolated-GPU sequence grid is:
+
+```text
+128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768
+```
+
+The Slurm worker no longer overrides this range. OOMs are retained as explicit
+outcomes. Every timing row includes trainable and total parameter counts; the
+adapters are not parameter-matched, so latency must never be presented as a
+fixed-parameter-budget result.
+
+### ListOps (`06`)
+
+The final scheduler uses one `(variant, seed)` per GPU allocation: 20 primary
+tasks (four models times five seeds) and 15 ablation tasks (five variants
+times three seeds). This replaces serial multi-model tasks and permits Slurm
+to schedule every independent cell on available GPUs.
+
+The default A40 setting is microbatch 8 with accumulation 4, preserving the
+effective batch 32. Before final submission, `MODE=06cal` runs a real
+2,000-token FSKA step at microbatches 8, 16, and 32. The largest setting that
+has substantial headroom is selected, with accumulation adjusted to retain
+effective batch 32 (`8x4`, `16x2`, or `32x1`). Every validation event now
+writes a progress JSON and an updated best-checkpoint file.
+
+### Experiment evidence and intended conclusion
+
+| Experiment | How the result is obtained | What it measures | One-line conclusion supported by the final result |
+|---|---|---|---|
+| `01` SST-5 diagnostics | Five seeds; four adapters; validation-loss checkpoint selection; one held-out test evaluation per seed | Accuracy, macro-F1, balanced accuracy, classwise metrics, confusion matrices, and alternative validation-selection audit | It determines whether any accuracy gain is broad five-class improvement or a class-imbalance trade-off. |
+| `02` Fixed density | Paired seeds and initialization; fixed frozen-prior density versus learned RealNVP | Contribution of density learning beyond bivariate spectral structure; initial/final checksums | It isolates whether learning the density produces a reproducible gain worth its extra cost. |
+| `03` KL sensitivity | Seven predeclared lambda values, five seeds each, with per-epoch CE/KL/validation logs | Regularisation sensitivity and numerical stability of the learned density | It reports a declared default and whether KL is necessary for stable, competitive learning. |
+| `04` ELU gap | Identical spectral samples; bounded 2,048-pair raw reference on held-out examples | Kernel discrepancy, denominator signs/magnitudes, context error, and raw-RFF failures | It distinguishes a stable practical positive map from the unstable signed raw normalisation rather than claiming equivalence. |
+| `05` Efficiency | Batch-1 FP32 attention-only measurements on one isolated GPU; five synchronized timing blocks per cell | Latency/IQR, tokens/s, memory, OOMs, parameters, and FSKA component times across length | It establishes observed scaling and cost, with parameter counts and OOM boundaries disclosed. |
+| `06` ListOps | Official splits; width 512/four-layer encoder; five primary and three ablation seeds; validation-selected checkpoint | Long-context test accuracy, length bins, truncation, memory, throughput, runtime, and capacity/QK ablations | It provides the primary long-context quality evidence and tests whether the FSKA design choices generalise beyond SST-5. |
+
+No numerical conclusion belongs in this section until the revised final grids
+complete. Preliminary diagnostic outputs should remain labelled preliminary
+and must not be mixed with results from the revised protocol.
+
 ### Relationship to the repository's `ours_latest`
 
 The current repository registers `ours_latest` as a later hybrid model. That

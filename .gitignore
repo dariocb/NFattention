@@ -40,3 +40,6 @@ experiments/text_classification/text_seq_classification_benchmark/m[0-9]*
 benchmark_results_quora_all_models
 *.err
 *.out
+
+rebuttal/slurm_logs/
+rebuttal/slurm_outputs/
