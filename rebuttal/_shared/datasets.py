@@ -10,6 +10,7 @@ import os
 import random
 import shutil
 import tarfile
+import urllib.error
 import urllib.request
 from collections import Counter
 from dataclasses import dataclass
@@ -20,6 +21,9 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 LRA_RELEASE_URL = "https://storage.googleapis.com/long-range-arena/lra_release.gz"
+LRA_HF_MIRROR = "fengyang0317/listops-1000"
+LRA_HF_MIRROR_REVISION = "7e315de6abf1ec966d04b68a29e83a3ae23ca646"
+LRA_SPLIT_SIZES = {"train": 96000, "validation": 2000, "test": 2000}
 
 
 @dataclass
@@ -111,11 +115,96 @@ def _download(url: str, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_suffix(destination.suffix + ".part")
     try:
-        urllib.request.urlretrieve(url, partial)
+        request = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (compatible; NFattention-rebuttal/1.0; "
+                    "+https://github.com/google-research/long-range-arena)"
+                )
+            },
+        )
+        with urllib.request.urlopen(request) as source, partial.open("wb") as target:
+            shutil.copyfileobj(source, target)
         partial.replace(destination)
     finally:
         if partial.exists():
             partial.unlink()
+
+
+def _prepare_listops_hf_mirror(data_dir: Path) -> Path:
+    """Materialize a revision-pinned mirror of the official 96k/2k/2k splits."""
+    try:
+        from datasets import load_dataset
+    except ImportError as exc:
+        raise RuntimeError(
+            "The official LRA archive was unavailable and the pinned ListOps "
+            "mirror requires the 'datasets' package."
+        ) from exc
+
+    mirror_root = data_dir / "hf_listops_1000"
+    expected_paths = {
+        "train": mirror_root / "basic_train.tsv",
+        "validation": mirror_root / "basic_val.tsv",
+        "test": mirror_root / "basic_test.tsv",
+    }
+    if all(path.exists() for path in expected_paths.values()):
+        return mirror_root
+
+    dataset = load_dataset(
+        LRA_HF_MIRROR,
+        revision=LRA_HF_MIRROR_REVISION,
+        cache_dir=str(data_dir / "hf_cache"),
+    )
+    for split_name, expected_size in LRA_SPLIT_SIZES.items():
+        if split_name not in dataset:
+            raise RuntimeError(
+                f"{LRA_HF_MIRROR} is missing the {split_name!r} split"
+            )
+        if len(dataset[split_name]) != expected_size:
+            raise RuntimeError(
+                f"{LRA_HF_MIRROR}:{split_name} has {len(dataset[split_name])} "
+                f"rows; expected {expected_size}"
+            )
+
+    mirror_root.mkdir(parents=True, exist_ok=True)
+    for split_name, destination in expected_paths.items():
+        split = dataset[split_name]
+        columns = {name.lower(): name for name in split.column_names}
+        if "source" not in columns or "target" not in columns:
+            raise RuntimeError(
+                f"{LRA_HF_MIRROR}:{split_name} must contain Source and Target"
+            )
+        source_column = columns["source"]
+        target_column = columns["target"]
+        partial = destination.with_suffix(destination.suffix + ".part")
+        try:
+            with partial.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle, delimiter="\t")
+                writer.writerow(["Source", "Target"])
+                for row in split:
+                    target = int(row[target_column])
+                    if target < 0 or target > 9:
+                        raise RuntimeError(
+                            f"Invalid ListOps target {target} in {split_name}"
+                        )
+                    writer.writerow([str(row[source_column]), target])
+            partial.replace(destination)
+        finally:
+            if partial.exists():
+                partial.unlink()
+
+    provenance = {
+        "source": "Hugging Face mirror of LRA ListOps",
+        "dataset": LRA_HF_MIRROR,
+        "revision": LRA_HF_MIRROR_REVISION,
+        "expected_split_sizes": LRA_SPLIT_SIZES,
+        "official_archive": LRA_RELEASE_URL,
+    }
+    with (mirror_root / "provenance.json").open("w", encoding="utf-8") as handle:
+        json.dump(provenance, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    return mirror_root
 
 
 def prepare_listops(data_dir: Path, download: bool = True) -> Path:
@@ -131,7 +220,15 @@ def prepare_listops(data_dir: Path, download: bool = True) -> Path:
                 f"ListOps data not found under {data_dir}. "
                 "Set DOWNLOAD_DATA=1 or download the official LRA release."
             )
-        _download(LRA_RELEASE_URL, archive_path)
+        try:
+            _download(LRA_RELEASE_URL, archive_path)
+        except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
+            print(
+                f"Official LRA archive download failed ({exc}); "
+                f"using pinned mirror {LRA_HF_MIRROR}@"
+                f"{LRA_HF_MIRROR_REVISION}."
+            )
+            return _prepare_listops_hf_mirror(data_dir)
 
     extract_dir = data_dir / "lra_release"
     extract_dir.mkdir(parents=True, exist_ok=True)
