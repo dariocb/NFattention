@@ -4,10 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -260,6 +261,42 @@ def kernel_diagnostics(
         pass
 
 
+def _elu_gap_completion_state(
+    output_dir: Path, seeds: List[int], grid_status: int
+) -> Tuple[List[Dict[str, object]], List[Dict[str, object]], List[int]]:
+    """Separate expected raw-map divergence from required-arm failures."""
+    failures_path = output_dir / "failures.json"
+    failures: List[Dict[str, object]] = []
+    if failures_path.exists():
+        payload = json.loads(failures_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            raise RuntimeError("failures.json must contain a list")
+        failures = [dict(item) for item in payload]
+
+    raw_divergences = [
+        failure
+        for failure in failures
+        if failure.get("variant") == "raw_rff"
+        and failure.get("error_type") == "FloatingPointError"
+    ]
+    unexpected_failures = [
+        failure for failure in failures if failure not in raw_divergences
+    ]
+    missing_elu_checkpoints = [
+        seed
+        for seed in seeds
+        if not (output_dir / "checkpoints" / f"elu_plus_one__seed{seed}.pt").exists()
+    ]
+    if grid_status != 0 and not failures:
+        unexpected_failures.append(
+            {
+                "error_type": "GridFailure",
+                "error": "The SST grid returned nonzero without a failure record.",
+            }
+        )
+    return raw_divergences, unexpected_failures, missing_elu_checkpoints
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     add_common_arguments(parser)
@@ -283,22 +320,48 @@ def main() -> int:
             "kl_weight": 1e-3,
         },
     ]
-    status = run_sst_grid(args, "elu_gap", variants)
-    if status == 0:
-        diagnostic_bundle = (
-            synthetic_bundle()
-            if args.smoke
-            else load_sst5(args.data_dir, revision=args.revision)
-        )
+    grid_status = run_sst_grid(args, "elu_gap", variants)
+    seeds = parse_seeds(args.seeds)
+    if args.smoke:
+        seeds = seeds[:1] or [0]
+
+    raw_divergences, unexpected_failures, missing_elu_checkpoints = (
+        _elu_gap_completion_state(args.output_dir, seeds, grid_status)
+    )
+    write_json(args.output_dir / "raw_rff_divergences.json", raw_divergences)
+    write_json(
+        args.output_dir / "diagnostic_status.json",
+        {
+            "grid_status": grid_status,
+            "raw_rff_divergence_count": len(raw_divergences),
+            "unexpected_failures": unexpected_failures,
+            "missing_elu_checkpoints": missing_elu_checkpoints,
+        },
+    )
+    if unexpected_failures or missing_elu_checkpoints:
+        return 1
+
+    diagnostic_bundle = (
+        synthetic_bundle()
+        if args.smoke
+        else load_sst5(args.data_dir, revision=args.revision)
+    )
+    try:
         kernel_diagnostics(
             args.output_dir,
             diagnostic_bundle,
-            parse_seeds(args.seeds),
+            seeds,
             torch.device(args.device),
             min(args.diagnostic_examples, 5) if args.smoke else args.diagnostic_examples,
             reference_pairs=32 if args.smoke else 2048,
         )
-    return status
+    except Exception as error:
+        write_json(
+            args.output_dir / "diagnostic_failure.json",
+            {"error_type": type(error).__name__, "error": str(error)},
+        )
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

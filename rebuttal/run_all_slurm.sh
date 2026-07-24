@@ -234,6 +234,6 @@ echo "Detailed accounting:"
 echo "  sacct -j ${SMOKE_JOB},${J01},${J02},${J03},${J04},${J05},${J06_PRIMARY},${J06_ABLATION} --format=JobID,JobName,State,Elapsed,ExitCode"
 echo
 echo "Smoke log:"
-echo "  tail -f ${REPO}/slurm_logs/fska_smoke_${SMOKE_JOB}_0.out"
+echo "  tail -f ${REPO}/slurm_logs/rebuttal_${SMOKE_JOB}_0.out"
 echo
 echo "Dependent arrays start only if smoke validation and data staging succeed."
