@@ -19,9 +19,11 @@ from torch.utils.data import DataLoader, Subset
 
 from rebuttal._shared.classifier import ModelConfig, build_model
 from rebuttal._shared.datasets import (
+    DatasetBundle,
     EncodedTextDataset,
     Vocabulary,
     load_sst5,
+    synthetic_bundle,
 )
 from rebuttal._shared.grid import (
     add_common_arguments,
@@ -47,6 +49,16 @@ def _features(x, omega1, omega2, pairs: int):
     projection1 = (2.0 * math.pi) * torch.einsum(
         "bhld,bhmd->bhlm", x, omega1
     )
+    projection2 = (2.0 * math.pi) * torch.einsum(
+        "bhld,bhmd->bhlm", x, omega2
+    )
+    return math.sqrt(1.0 / (4.0 * pairs)) * torch.cat(
+        [
+            projection1.cos() + projection2.cos(),
+            projection1.sin() + projection2.sin(),
+        ],
+        dim=-1,
+    )
 
 
 def _diagnostic_context(phi_q, phi_k, values, mask, signed: bool):
@@ -66,28 +78,17 @@ def _diagnostic_context(phi_q, phi_k, values, mask, signed: bool):
         clamped = denominator < epsilon
         stable = denominator.clamp_min(epsilon)
     return numerator / stable.unsqueeze(-1), denominator, clamped
-    projection2 = (2.0 * math.pi) * torch.einsum(
-        "bhld,bhmd->bhlm", x, omega2
-    )
-    return math.sqrt(1.0 / (4.0 * pairs)) * torch.cat(
-        [
-            projection1.cos() + projection2.cos(),
-            projection1.sin() + projection2.sin(),
-        ],
-        dim=-1,
-    )
 
 
 @torch.no_grad()
 def kernel_diagnostics(
     output_dir: Path,
-    data_dir: Path,
+    bundle: DatasetBundle,
     seeds: List[int],
     device: torch.device,
     max_examples: int,
-    revision: str | None,
+    reference_pairs: int = 2048,
 ) -> None:
-    bundle = load_sst5(data_dir, revision=revision)
     records: List[Dict[str, float]] = []
     for seed in seeds:
         checkpoint_path = output_dir / "checkpoints" / f"elu_plus_one__seed{seed}.pt"
@@ -144,7 +145,6 @@ def kernel_diagnostics(
             k = attention._split_heads(k_source)
             values = torch.einsum("bld,hde->bhle", states, attention.fixed_v)
 
-            reference_pairs = 2048
             samples = attention.density.sample(
                 attention.n_heads * reference_pairs, evaluation=True
             ).to(dtype=q.dtype).view(
@@ -284,14 +284,19 @@ def main() -> int:
         },
     ]
     status = run_sst_grid(args, "elu_gap", variants)
-    if status == 0 and not args.smoke:
+    if status == 0:
+        diagnostic_bundle = (
+            synthetic_bundle()
+            if args.smoke
+            else load_sst5(args.data_dir, revision=args.revision)
+        )
         kernel_diagnostics(
             args.output_dir,
-            args.data_dir,
+            diagnostic_bundle,
             parse_seeds(args.seeds),
             torch.device(args.device),
-            args.diagnostic_examples,
-            args.revision,
+            min(args.diagnostic_examples, 5) if args.smoke else args.diagnostic_examples,
+            reference_pairs=32 if args.smoke else 2048,
         )
     return status
 
