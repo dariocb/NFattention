@@ -4,6 +4,7 @@ venv/
 ENV/
 env/
 __pycache__/
+.cache
 *.py[cod]
 *.pyo
 *.pyd
@@ -36,3 +37,6 @@ experiments/mnist_ablation/mnist_focused_results*/
 logs
 *.log
 experiments/text_classification/text_seq_classification_benchmark/m[0-9]*
+benchmark_results_quora_all_models
+*.err
+*.out

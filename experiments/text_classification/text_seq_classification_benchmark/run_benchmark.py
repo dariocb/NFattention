@@ -55,6 +55,13 @@ DATASET_CONFIG = {
         "use_cv": False,
         "description": "Yelp Full (五分类)"
     },
+    "hyperpartisan": {
+        "use_cv": False,
+        "description": "Hyperpartisan 长文本新闻 (二分类)"
+    },
+    "imdb": {
+        "use_cv": False,
+        "description": "IMDB 影评 (二分类, 长文本)"
     "quora": {
         "use_cv": False,
         "description": "Quora QQP (二分类)"
@@ -269,6 +276,8 @@ def main():
                        help='输出目录')
     parser.add_argument('--gpu', type=int, default=None,
                        help='GPU ID')
+    parser.add_argument('--max_seq_len', type=int, default=None,
+                       help='覆盖配置里的 max_seq_len（长文本实验用 1024）')
     parser.add_argument('--quick', action='store_true',
                        help='快速模式（只运行小数据集）')
     parser.add_argument('--no_progress', action='store_true',
@@ -314,7 +323,11 @@ def main():
                 'gradient_clip': 1.0,
             }
         }
-    
+
+    # CLI 覆盖 max_seq_len（长文本实验：--max_seq_len 1024）
+    if args.max_seq_len is not None:
+        config.setdefault('model_params', {})['max_seq_len'] = args.max_seq_len
+
     # 创建输出目录
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join(args.output_dir, f"run_{timestamp}")

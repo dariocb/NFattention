@@ -89,7 +89,7 @@ def main():
                        choices=['rt_polarity', 'sst2', 'sst5', 'trec', 'ag_news', 'dbpedia_14', 'yelp_review_full', 'quora'],
                        help='数据集')
     parser.add_argument('--model', type=str, default='transformer',
-                       choices=['transformer', 'mikan', 'mgk', 'performer', 'rka', 'gmm_rks', 'ours_fixed_qk', 'ours_trainable_qk'],
+                       choices=['transformer', 'mikan', 'mgk', 'performer', 'rka', 'gmm_rks', 'ours_latest', 'ours_latest_head_kernel', 'ours_fixed_qk', 'ours_trainable_qk'],
                        help='模型')
     parser.add_argument('--epochs', type=int, default=3, help='训练 epoch 数')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size')

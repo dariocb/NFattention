@@ -45,7 +45,7 @@ def _naive_recurrent_gla(
         ki = k[:, :, i]
         vi = v[:, :, i]
         kv = ki.unsqueeze(-1) * vi.unsqueeze(-2)
-        s = s * gate.unsqueeze(-1).unsqueeze(-1) + kv
+        s = s * gate.unsqueeze(-1) + kv
         qi = q[:, :, i, :]
         o[:, :, i] = (qi.unsqueeze(-1) * s).sum(-2)
     return o.transpose(1, 2).to(dtype)
@@ -109,19 +109,20 @@ class MetaLATokenMixer(nn.Module):
             v = v * m
             gk = gk * m
 
-        q_h = q.view(q.shape[0], q.shape[1], self.num_heads, self.key_dim).transpose(1, 2)
-        k_h = k_coeff.view(k_coeff.shape[0], k_coeff.shape[1], self.num_heads, self.key_dim).transpose(1, 2)
-        v_h = v.view(v.shape[0], v.shape[1], self.num_heads, self.head_dim).transpose(1, 2)
-        g_h = gk.view(gk.shape[0], gk.shape[1], self.num_heads, self.key_dim).transpose(1, 2)
+        # Keep [B, L, H, D] layout; _naive_recurrent_gla transposes to [B, H, L, D] internally.
+        q_h = q.view(q.shape[0], q.shape[1], self.num_heads, self.key_dim)
+        k_h = k_coeff.view(k_coeff.shape[0], k_coeff.shape[1], self.num_heads, self.key_dim)
+        v_h = v.view(v.shape[0], v.shape[1], self.num_heads, self.head_dim)
+        g_h = gk.view(gk.shape[0], gk.shape[1], self.num_heads, self.key_dim)
 
         o = _naive_recurrent_gla(q_h, k_h, v_h, g_h)
         aug_b = self.aug_balance.view(self.num_heads, self.key_dim).to(o.dtype)
-        augk = k_h * aug_b.unsqueeze(0).unsqueeze(2)
+        augk = k_h * aug_b.unsqueeze(0).unsqueeze(0)
         aug_w = (q_h * augk).sum(-1)
         o = o + torch.sigmoid(aug_w.unsqueeze(-1)) * v_h
 
-        o = self.group_norm(o)
-        o = o.transpose(1, 2).reshape(x.shape[0], x.shape[1], self.embed_dim)
+        o = self.group_norm(o.transpose(1, 2)).transpose(1, 2)
+        o = o.reshape(x.shape[0], x.shape[1], self.embed_dim)
         o = F.silu(g_out) * o
         return self.out_proj(o)
 

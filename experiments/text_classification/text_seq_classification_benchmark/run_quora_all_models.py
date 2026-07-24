@@ -19,9 +19,10 @@ ALL_MODELS = [
     "gmm_rks",
     "kpca_scaled",
     "metala",
-    "ours_latest",
-    "ours_fixed_qk",
-    "ours_trainable_qk",
+    "ours_latest_head_kernel",
+    # "ours_latest",
+    # "ours_fixed_qk",
+    # "ours_trainable_qk",
 ]
 
 
