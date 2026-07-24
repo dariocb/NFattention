@@ -1,2 +1,0 @@
-model_types,seq_lens,batch_size,d_model,n_heads,n_layers,M,timestamp
-"['transformer', 'mikan', 'performer', 'rka', 'gmm_rks', 'mgk', 'kpca_scaled', 'metala', 'ours_latest']","[128, 256, 512]",2,64,2,1,32,20260421_125932

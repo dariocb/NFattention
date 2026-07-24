@@ -14,7 +14,6 @@ from utils import load_config, save_config, get_device, setup_logging
 ALL_MODELS = [
     "transformer",
     "mikan",
-    "mgk",
     "performer",
     "rka",
     "gmm_rks",
