@@ -19,7 +19,7 @@
 set -euo pipefail
 
 # Step 2: Require an explicit work mode from the submission script.
-: "${MODE:?Submit with MODE=smoke,01,02,03,04,05,06p,06a,or 06cal}"
+: "${MODE:?Submit with MODE=smoke,01,02,03,04,04_1,05,06p,06a,or 06cal}"
 
 # Step 3: Load the same Python module used to create the virtual environment.
 module purge
@@ -97,6 +97,10 @@ case "${MODE}" in
             --smoke --device cuda:0 --seeds 0 \
             --output-dir "${TASK_OUTPUT}/04"
 
+        python rebuttal/04_1_elu_gap_long_sequences/main.py \
+            --smoke --device cuda:0 \
+            --output-dir "${TASK_OUTPUT}/04_1"
+
         python rebuttal/05_efficiency/main.py \
             --smoke --device cuda:0 \
             --output-dir "${TASK_OUTPUT}/05"
@@ -136,6 +140,16 @@ print('ListOps:', load_listops(root / 'listops', download=True).manifest())
         export SKIP_SMOKE=1
 
         bash "rebuttal/${EXPERIMENT}/run.sh"
+        ;;
+
+    04_1)
+        # Supplemental long-sequence numerical diagnostic. It does not alter
+        # the SST-5 or standard ListOps quality protocols.
+        export PYTHON=python
+        export CUDA_DEVICE=cuda:0
+        export OUTPUT_DIR="${TASK_OUTPUT}"
+        export SKIP_SMOKE=1
+        bash rebuttal/04_1_elu_gap_long_sequences/run.sh
         ;;
 
     05)
@@ -187,11 +201,12 @@ print('ListOps:', load_listops(root / 'listops', download=True).manifest())
         ;;
 
     06cal)
-        # One true 2,000-token FSKA step for memory calibration. Submit
-        # separate LISTOPS_MICROBATCH values before the final 06 arrays.
+        # One true 2,000-token model step for memory calibration. Transformer
+        # is the default because its dense attention is the memory worst case;
+        # set LISTOPS_CAL_VARIANT=fska_main only when sizing an FSKA-only arm.
         python rebuttal/06_listops/main.py \
             --device cuda:0 --primary-seeds 0 --ablation-seeds "" \
-            --primary-variants fska_main --steps 1 \
+            --primary-variants "${LISTOPS_CAL_VARIANT:-transformer}" --steps 1 \
             --microbatch "${LISTOPS_MICROBATCH:?Set LISTOPS_MICROBATCH}" \
             --gradient-accumulation 1 --eval-every 1 --no-download \
             --data-dir "${DATA_ROOT}/listops" --output-dir "${TASK_OUTPUT}"

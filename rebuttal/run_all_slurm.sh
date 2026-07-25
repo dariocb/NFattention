@@ -137,7 +137,8 @@ SMOKE_JOB="$(sbatch --parsable \
 DEPENDENCY="afterok:${SMOKE_JOB}"
 echo "Smoke job: ${SMOKE_JOB}"
 
-# Step 9: Submit experiments 01--04 as five-task seed arrays. They remain
+# Step 9: Submit experiments 01--04 as five-task seed arrays, plus the
+# supplemental single-task experiment 04.1. They remain
 # pending until smoke validation and dataset staging complete successfully.
 echo "Submitting SST-5 seed arrays."
 J01="$(sbatch --parsable \
@@ -166,6 +167,15 @@ J04="$(sbatch --parsable \
     --dependency="${DEPENDENCY}" \
     --array=0-4 \
     --export=ALL,MODE=04 \
+    "${WORKER}")"
+
+# 04.1 is a supplemental, bounded long-sequence numerical diagnostic. It has
+# one deterministic task rather than a downstream seed array.
+J041="$(sbatch --parsable \
+    --job-name=fska_04_1_elu_long \
+    --dependency="${DEPENDENCY}" \
+    --array=0-0 \
+    --export=ALL,MODE=04_1 \
     "${WORKER}")"
 
 # Step 10: Submit the efficiency harness as one task so every timing cell uses
@@ -209,6 +219,7 @@ MANIFEST="${REPO}/rebuttal/slurm_submissions/${SUBMISSION_STAMP}.env"
     echo "J02=${J02}"
     echo "J03=${J03}"
     echo "J04=${J04}"
+    echo "J041=${J041}"
     echo "J05=${J05}"
     echo "J06_PRIMARY=${J06_PRIMARY}"
     echo "J06_ABLATION=${J06_ABLATION}"
@@ -223,6 +234,7 @@ echo "  Experiment 01:   ${J01}"
 echo "  Experiment 02:   ${J02}"
 echo "  Experiment 03:   ${J03}"
 echo "  Experiment 04:   ${J04}"
+echo "  Experiment 04.1: ${J041}"
 echo "  Experiment 05:   ${J05}"
 echo "  ListOps primary: ${J06_PRIMARY}"
 echo "  ListOps ablation:${J06_ABLATION}"
@@ -231,7 +243,7 @@ echo "Monitor:"
 echo "  squeue -u \"${USER}\""
 echo
 echo "Detailed accounting:"
-echo "  sacct -j ${SMOKE_JOB},${J01},${J02},${J03},${J04},${J05},${J06_PRIMARY},${J06_ABLATION} --format=JobID,JobName,State,Elapsed,ExitCode"
+echo "  sacct -j ${SMOKE_JOB},${J01},${J02},${J03},${J04},${J041},${J05},${J06_PRIMARY},${J06_ABLATION} --format=JobID,JobName,State,Elapsed,ExitCode"
 echo
 echo "Smoke log:"
 echo "  tail -f ${REPO}/slurm_logs/rebuttal_${SMOKE_JOB}_0.out"

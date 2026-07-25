@@ -18,6 +18,7 @@ bash rebuttal/01_sst5_diagnostics/run.sh
 bash rebuttal/02_fixed_density/run.sh
 bash rebuttal/03_kl_sensitivity/run.sh
 bash rebuttal/04_elu_gap/run.sh
+bash rebuttal/04_1_elu_gap_long_sequences/run.sh
 bash rebuttal/05_efficiency/run.sh
 bash rebuttal/06_listops/run.sh
 ```
@@ -38,4 +39,3 @@ Common environment variables:
 
 ListOps also accepts `ABLATION_SEEDS`, `STEPS`, `MICROBATCH`, and
 `GRADIENT_ACCUMULATION`. Efficiency accepts `SEQ_LENGTHS`.
-

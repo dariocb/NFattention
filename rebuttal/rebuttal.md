@@ -115,8 +115,12 @@ We launch `02_fixed_density`.
 
 This is a paired SST-5 comparison between:
 
+- a fixed single joint Gaussian over each paired frequency vector, as a
+  conventional stationary baseline;
 - a fixed, untrained bivariate density sampled from the frozen
   spectral-mixture prior; and
+- a learned two-component equal-weight Gaussian-mixture density with no
+  normalizing flow, regularised toward that same frozen target; and
 - a learned bivariate RealNVP density.
 
 The Q/K setting, fixed orthogonal V, ELU+1 feature map, number of spectral
@@ -124,6 +128,16 @@ pairs, architecture, initialization seeds, dataset splits, and training
 budget are held constant. Pairing the runs by seed reduces variance in the
 learned-versus-fixed difference and isolates whether optimizing the density
 adds value beyond the bivariate construction itself.
+
+The frozen-mixture versus learned-flow pair is the fair causal test of density
+learning because both share the same spectral-mixture target. The additional
+single-Gaussian arm is not a replacement for that pair: it instead tests the
+broader practical question of whether the learned construction improves over a
+conventional fixed stationary Gaussian baseline.
+
+The learned two-component mixture is a deliberately low-capacity intermediate
+arm. It tests whether simple learned means and diagonal scales suffice before
+attributing any difference to the added flexibility of a normalizing flow.
 
 The fixed arm records initial and final density checksums. Equality of those
 checksums is an implementation-level control showing that the nominally fixed

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import copy
 import contextlib
+import json
 import math
 import random
 import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
@@ -43,6 +45,89 @@ class TrainConfig:
     mixed_precision: bool = False
     optimizer: str = "adam"
     selection_metrics: Tuple[str, ...] = ("loss", "accuracy", "macro_f1")
+    # When set, fail at the first non-finite module boundary and persist an
+    # actionable trace. This is deliberately opt-in: hooks add overhead and
+    # are used for the ListOps numerical-stability audit.
+    nonfinite_trace_path: Optional[str] = None
+
+
+class NonFiniteTensorError(FloatingPointError):
+    """Raised as soon as a traced training tensor becomes non-finite."""
+
+    def __init__(self, record: Mapping[str, object]):
+        self.record = dict(record)
+        super().__init__(
+            "Non-finite tensor at "
+            f"{self.record['location']} ({self.record['kind']}, "
+            f"shape={self.record['shape']}, dtype={self.record['dtype']})"
+        )
+
+
+def _tensor_leaves(value: object) -> Iterable[Tensor]:
+    if isinstance(value, Tensor):
+        yield value
+    elif isinstance(value, Mapping):
+        for item in value.values():
+            yield from _tensor_leaves(item)
+    elif isinstance(value, (tuple, list)):
+        for item in value:
+            yield from _tensor_leaves(item)
+    elif hasattr(value, "__dict__"):
+        yield from _tensor_leaves(vars(value))
+
+
+class NonFiniteTensorTracker:
+    """Forward-boundary tracer used to localise AMP/long-sequence failures."""
+
+    def __init__(self, model: nn.Module, trace_path: str, step_getter):
+        self.trace_path = trace_path
+        self.step_getter = step_getter
+        self.handles = []
+        for name, module in model.named_modules():
+            location = name or model.__class__.__name__
+            self.handles.append(
+                module.register_forward_pre_hook(
+                    lambda _module, inputs, where=location: self._check(
+                        inputs, where, "input"
+                    )
+                )
+            )
+            self.handles.append(
+                module.register_forward_hook(
+                    lambda _module, inputs, output, where=location: self._check(
+                        output, where, "output"
+                    )
+                )
+            )
+
+    def _check(self, value: object, location: str, kind: str) -> None:
+        for tensor in _tensor_leaves(value):
+            if not tensor.is_floating_point() and not tensor.is_complex():
+                continue
+            if torch.isfinite(tensor).all():
+                continue
+            finite = tensor[torch.isfinite(tensor)]
+            record = {
+                "step": int(self.step_getter()),
+                "location": location,
+                "kind": kind,
+                "shape": list(tensor.shape),
+                "dtype": str(tensor.dtype),
+                "device": str(tensor.device),
+                "numel": int(tensor.numel()),
+                "nonfinite_count": int((~torch.isfinite(tensor)).sum().item()),
+                "finite_min": float(finite.min().item()) if finite.numel() else None,
+                "finite_max": float(finite.max().item()) if finite.numel() else None,
+            }
+            path = Path(self.trace_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+            raise NonFiniteTensorError(record)
+
+    def close(self) -> None:
+        for handle in self.handles:
+            handle.remove()
+        self.handles.clear()
 
 
 def _clone_state(model: nn.Module) -> Dict[str, Tensor]:
@@ -147,6 +232,13 @@ def train_model(
     stale_evaluations = 0
     started = time.perf_counter()
     stop = False
+    tracker = (
+        NonFiniteTensorTracker(
+            model, train_config.nonfinite_trace_path, lambda: global_step
+        )
+        if train_config.nonfinite_trace_path
+        else None
+    )
 
     def record_validation(epoch_number: int) -> bool:
         nonlocal stale_evaluations
@@ -179,74 +271,92 @@ def train_model(
         model.train()
         return improved_primary
 
-    while not stop:
-        epoch = int(history[-1]["epoch"]) + 1 if history and train_config.max_steps is None else 1
-        model.train()
-        optimizer.zero_grad(set_to_none=True)
-        epoch_ce = 0.0
-        epoch_kl_raw = 0.0
-        epoch_kl = 0.0
-        epoch_examples = 0
-        for batch_index, (
+    try:
+        while not stop:
+            epoch = int(history[-1]["epoch"]) + 1 if history and train_config.max_steps is None else 1
+            model.train()
+            optimizer.zero_grad(set_to_none=True)
+            epoch_ce = 0.0
+            epoch_kl_raw = 0.0
+            epoch_kl = 0.0
+            epoch_examples = 0
+            for batch_index, (
             input_ids,
             attention_mask,
             labels,
             _lengths,
             _indices,
-        ) in enumerate(loaders.train):
-            model.set_sampling_step(global_step)
-            input_ids = input_ids.to(device, non_blocking=True)
-            attention_mask = attention_mask.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True)
-            autocast_context = (
-                torch.cuda.amp.autocast() if use_amp else contextlib.nullcontext()
-            )
-            with autocast_context:
-                output = model(input_ids, attention_mask)
-                ce_loss = F.cross_entropy(output.logits, labels)
-                weighted_kl = output.kl_raw * model.kl_weight
-                loss = (ce_loss + weighted_kl) / train_config.gradient_accumulation
-            scaler.scale(loss).backward()
-            epoch_ce += float(ce_loss.detach().item()) * len(labels)
-            epoch_kl_raw += float(output.kl_raw.detach().item()) * len(labels)
-            epoch_kl += float(weighted_kl.detach().item()) * len(labels)
-            epoch_examples += len(labels)
-
-            boundary = (batch_index + 1) % train_config.gradient_accumulation == 0
-            last_batch = batch_index + 1 == len(loaders.train)
-            if boundary or last_batch:
-                if train_config.gradient_clip > 0:
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), train_config.gradient_clip
-                    )
-                if train_config.optimizer == "listops_adam":
-                    next_step = global_step + 1
-                    lr = _listops_lr(next_step, train_config)
-                    for group in optimizer.param_groups:
-                        group["lr"] = lr
-                scaler.step(optimizer)
-                scaler.update()
-                optimizer.zero_grad(set_to_none=True)
-                global_step += 1
-
-                should_evaluate = train_config.max_steps is not None and (
-                    global_step % train_config.eval_every == 0
-                    or global_step >= train_config.max_steps
+            ) in enumerate(loaders.train):
+                model.set_sampling_step(global_step)
+                input_ids = input_ids.to(device, non_blocking=True)
+                attention_mask = attention_mask.to(device, non_blocking=True)
+                labels = labels.to(device, non_blocking=True)
+                autocast_context = (
+                    torch.cuda.amp.autocast() if use_amp else contextlib.nullcontext()
                 )
-                if should_evaluate:
-                    record_validation(epoch)
+                with autocast_context:
+                    output = model(input_ids, attention_mask)
+                    ce_loss = F.cross_entropy(output.logits, labels)
+                    weighted_kl = output.kl_raw * model.kl_weight
+                    loss = (ce_loss + weighted_kl) / train_config.gradient_accumulation
+                if not torch.isfinite(loss):
+                    location = "training.loss"
+                    record = {
+                        "step": int(global_step), "location": location,
+                        "kind": "loss", "shape": list(loss.shape),
+                        "dtype": str(loss.dtype), "device": str(loss.device),
+                        "numel": int(loss.numel()), "nonfinite_count": 1,
+                        "finite_min": None, "finite_max": None,
+                    }
+                    if train_config.nonfinite_trace_path:
+                        path = Path(train_config.nonfinite_trace_path)
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+                    raise NonFiniteTensorError(record)
+                scaler.scale(loss).backward()
+                epoch_ce += float(ce_loss.detach().item()) * len(labels)
+                epoch_kl_raw += float(output.kl_raw.detach().item()) * len(labels)
+                epoch_kl += float(weighted_kl.detach().item()) * len(labels)
+                epoch_examples += len(labels)
 
-                if train_config.max_steps is not None and global_step >= train_config.max_steps:
+                boundary = (batch_index + 1) % train_config.gradient_accumulation == 0
+                last_batch = batch_index + 1 == len(loaders.train)
+                if boundary or last_batch:
+                    if train_config.gradient_clip > 0:
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(
+                            model.parameters(), train_config.gradient_clip
+                        )
+                    if train_config.optimizer == "listops_adam":
+                        next_step = global_step + 1
+                        lr = _listops_lr(next_step, train_config)
+                        for group in optimizer.param_groups:
+                            group["lr"] = lr
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad(set_to_none=True)
+                    global_step += 1
+
+                    should_evaluate = train_config.max_steps is not None and (
+                        global_step % train_config.eval_every == 0
+                        or global_step >= train_config.max_steps
+                    )
+                    if should_evaluate:
+                        record_validation(epoch)
+
+                    if train_config.max_steps is not None and global_step >= train_config.max_steps:
+                        stop = True
+                        break
+
+            if train_config.max_steps is None:
+                record_validation(epoch)
+                if stale_evaluations >= train_config.patience or epoch >= train_config.max_epochs:
                     stop = True
-                    break
-
-        if train_config.max_steps is None:
-            record_validation(epoch)
-            if stale_evaluations >= train_config.patience or epoch >= train_config.max_epochs:
-                stop = True
-        elif not stop and len(loaders.train) == 0:
-            raise RuntimeError("Empty training loader")
+            elif not stop and len(loaders.train) == 0:
+                raise RuntimeError("Empty training loader")
+    finally:
+        if tracker is not None:
+            tracker.close()
 
     train_time = time.perf_counter() - started
     selections: Dict[str, object] = {}

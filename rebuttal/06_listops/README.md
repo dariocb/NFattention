@@ -21,3 +21,9 @@ an updated best-checkpoint file. Override defaults with `SEEDS`,
 The output contains validation-selected predictions, length-bin accuracy,
 length/truncation statistics, wall-clock, throughput, peak CUDA memory,
 checkpoints, tables, and capacity plots.
+
+ListOps now defaults to FP32 (`--no-mixed-precision`) because the earlier AMP
+run produced non-finite RKA/FSKA training losses. RKA and FSKA write a
+fail-fast `nonfinite_traces/<variant>__seed<seed>.json` record at the first
+non-finite module boundary. Set `--mixed-precision` only for a separate AMP
+comparison, never as the primary stability result.

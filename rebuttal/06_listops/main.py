@@ -82,6 +82,13 @@ def main() -> int:
     parser.add_argument("--microbatch", type=int, default=4)
     parser.add_argument("--gradient-accumulation", type=int, default=8)
     parser.add_argument("--eval-every", type=int, default=50)
+    parser.add_argument(
+        "--mixed-precision", action=argparse.BooleanOptionalAction, default=False,
+        help=(
+            "Use CUDA AMP. Disabled by default because the original ListOps "
+            "RKA/FSKA runs produced non-finite FP16 training losses."
+        ),
+    )
     parser.add_argument("--download", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args()
@@ -162,6 +169,7 @@ def main() -> int:
             "learning_rate": 0.05,
             "warmup_steps": 1000,
             "weight_decay": 0.1,
+            "mixed_precision": args.mixed_precision,
         },
         "primary_seeds": primary_seeds,
         "ablation_seeds": ablation_seeds,
@@ -235,9 +243,20 @@ def main() -> int:
                         max_steps=args.steps,
                         eval_every=args.eval_every,
                         warmup_steps=1000,
-                        mixed_precision=not args.smoke,
+                        # Full FP32 is the default audit setting. It removes the
+                        # train-FP16/eval-FP32 mismatch behind the prior NaNs.
+                        mixed_precision=(args.mixed_precision and not args.smoke),
                         optimizer="listops_adam",
                         selection_metrics=("accuracy",),
+                        nonfinite_trace_path=(
+                            str(
+                                args.output_dir
+                                / "nonfinite_traces"
+                                / f"{variant['name']}__seed{seed}.json"
+                            )
+                            if variant["model_name"] in {"rka", "fska"}
+                            else None
+                        ),
                     )
                     if device.type == "cuda":
                         torch.cuda.reset_peak_memory_stats(device)
