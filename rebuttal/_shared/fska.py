@@ -36,7 +36,7 @@ class FSKAConfig:
     hidden_dim: int = 128
     n_heads: int = 4
     num_spectral_pairs: int = 64
-    density_mode: str = "learned_flow"  # learned_flow | fixed_bivariate
+    density_mode: str = "learned_flow"  # learned_flow | fixed_bivariate | fixed_single_gaussian | learned_two_component_gmm
     feature_map: str = "elu_plus_one"  # elu_plus_one | raw_rff
     qk_mode: str = "identity"  # identity | learned
     value_mode: str = "fixed_orthogonal"
@@ -52,7 +52,12 @@ class FSKAConfig:
     def validate(self) -> None:
         if self.hidden_dim % self.n_heads:
             raise ValueError("hidden_dim must be divisible by n_heads")
-        if self.density_mode not in {"learned_flow", "fixed_bivariate"}:
+        if self.density_mode not in {
+            "learned_flow",
+            "fixed_bivariate",
+            "fixed_single_gaussian",
+            "learned_two_component_gmm",
+        }:
             raise ValueError(f"Unsupported density_mode: {self.density_mode}")
         if self.feature_map not in {"elu_plus_one", "raw_rff"}:
             raise ValueError(f"Unsupported feature_map: {self.feature_map}")
@@ -98,6 +103,28 @@ class SpectralDensity(nn.Module):
             )
             for parameter in self.prior.parameters():
                 parameter.requires_grad_(False)
+
+            # This is an additional conventional stationary baseline, not the
+            # matched fixed-prior arm: it replaces the 10-component target
+            # mixture by one diagonal Gaussian over the joint (omega1,omega2).
+            self.fixed_distribution = (
+                nf.distributions.DiagGaussian(dim)
+                if config.density_mode == "fixed_single_gaussian"
+                else None
+            )
+            if self.fixed_distribution is not None:
+                for parameter in self.fixed_distribution.parameters():
+                    parameter.requires_grad_(False)
+
+            # Low-capacity learned-density baseline. Equal component weights
+            # avoid a non-reparameterised discrete-weight estimator; means and
+            # diagonal log-scales are still learned by pathwise gradients.
+            if config.density_mode == "learned_two_component_gmm":
+                self.learned_gmm_means = nn.Parameter(torch.zeros(2, dim))
+                self.learned_gmm_log_scales = nn.Parameter(torch.zeros(2, dim))
+            else:
+                self.register_parameter("learned_gmm_means", None)
+                self.register_parameter("learned_gmm_log_scales", None)
 
             if config.density_mode == "learned_flow":
                 mask = torch.tensor(
@@ -154,15 +181,25 @@ class SpectralDensity(nn.Module):
             torch.manual_seed(seed)
             if device.type == "cuda":
                 torch.cuda.manual_seed_all(seed)
-            distribution = self.flow if self.flow is not None else self.prior
-            sampled = distribution.sample(num_samples=count)
-            samples = sampled[0] if isinstance(sampled, tuple) else sampled
+            if self.flow is not None:
+                sampled = self.flow.sample(num_samples=count)
+                samples = sampled[0] if isinstance(sampled, tuple) else sampled
+            elif self.learned_gmm_means is not None:
+                component = torch.randint(0, 2, (count,), device=device)
+                noise = torch.randn(count, self.dim, device=device)
+                samples = self.learned_gmm_means[component] + (
+                    self.learned_gmm_log_scales[component].exp() * noise
+                )
+            else:
+                distribution = self.fixed_distribution or self.prior
+                sampled = distribution.sample(num_samples=count)
+                samples = sampled[0] if isinstance(sampled, tuple) else sampled
         if not torch.isfinite(samples).all():
             raise FloatingPointError("Non-finite spectral sample")
         return samples.clamp(-10.0, 10.0)
 
     def reverse_kl(self, count: int, evaluation: bool) -> Tensor:
-        if self.flow is None:
+        if self.flow is None and self.learned_gmm_means is None:
             return torch.zeros((), device=self._device())
         device = self._device()
         seed = self._seed(evaluation, purpose_offset=7919)
@@ -170,7 +207,23 @@ class SpectralDensity(nn.Module):
             torch.manual_seed(seed)
             if device.type == "cuda":
                 torch.cuda.manual_seed_all(seed)
-            value = self.flow.reverse_kld(count)
+            if self.flow is not None:
+                value = self.flow.reverse_kld(count)
+            else:
+                component = torch.randint(0, 2, (count,), device=device)
+                noise = torch.randn(count, self.dim, device=device)
+                scales = self.learned_gmm_log_scales.exp()
+                samples = self.learned_gmm_means[component] + scales[component] * noise
+                normalized = (
+                    samples[:, None, :] - self.learned_gmm_means[None]
+                ) / scales[None]
+                component_log_prob = -0.5 * (
+                    normalized.square()
+                    + 2.0 * self.learned_gmm_log_scales[None]
+                    + math.log(2.0 * math.pi)
+                ).sum(dim=-1)
+                log_q = torch.logsumexp(component_log_prob, dim=1) - math.log(2.0)
+                value = (log_q - self.prior.log_prob(samples)).mean()
         if not torch.isfinite(value):
             raise FloatingPointError("Non-finite reverse KL")
         return value
@@ -178,7 +231,9 @@ class SpectralDensity(nn.Module):
     def checksum(self, include_flow: bool = True) -> str:
         digest = hashlib.sha256()
         for name, tensor in sorted(self.state_dict().items()):
-            if not include_flow and self.flow is not None and name.startswith("flow."):
+            if not include_flow and (
+                name.startswith("flow.") or name.startswith("learned_gmm_")
+            ):
                 continue
             digest.update(name.encode("utf-8"))
             digest.update(tensor.detach().cpu().contiguous().numpy().tobytes())

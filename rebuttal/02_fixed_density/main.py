@@ -19,12 +19,28 @@ def main() -> int:
     args = parser.parse_args()
     variants = [
         {
+            "name": "fixed_single_gaussian",
+            "model_name": "fska",
+            "density_mode": "fixed_single_gaussian",
+            "feature_map": "elu_plus_one",
+            "qk_mode": "identity",
+            "kl_weight": 0.0,
+        },
+        {
             "name": "fixed_bivariate",
             "model_name": "fska",
             "density_mode": "fixed_bivariate",
             "feature_map": "elu_plus_one",
             "qk_mode": "identity",
             "kl_weight": 0.0,
+        },
+        {
+            "name": "learned_two_component_gmm",
+            "model_name": "fska",
+            "density_mode": "learned_two_component_gmm",
+            "feature_map": "elu_plus_one",
+            "qk_mode": "identity",
+            "kl_weight": 1e-3,
         },
         {
             "name": "learned_flow",
