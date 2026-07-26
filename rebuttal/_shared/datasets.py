@@ -294,6 +294,71 @@ def load_listops(data_dir: Path, download: bool = True) -> DatasetBundle:
     )
 
 
+def evaluate_listops_expression(text: str) -> int:
+    """Independently evaluate normalized ListOps syntax for label auditing."""
+    tokens = text.split()
+    position = 0
+
+    def parse() -> int:
+        nonlocal position
+        if position >= len(tokens):
+            raise ValueError("Unexpected end of ListOps expression")
+        token = tokens[position]
+        position += 1
+        if token.isdigit() and len(token) == 1:
+            return int(token)
+        if not token.startswith("["):
+            raise ValueError(f"Unexpected ListOps token {token!r}")
+        operation = token[1:].upper()
+        values: List[int] = []
+        while position < len(tokens) and tokens[position] != "X":
+            values.append(parse())
+        if position == len(tokens):
+            raise ValueError(f"Unclosed ListOps operation {operation!r}")
+        position += 1  # closing bracket encoded as X
+        if not values:
+            raise ValueError(f"Empty ListOps operation {operation!r}")
+        if operation == "MIN":
+            return min(values)
+        if operation == "MAX":
+            return max(values)
+        if operation == "MED":
+            ordered = sorted(values)
+            # The official generator uses int(np.median(values)); for an even
+            # number of integer arguments this truncates the two-middle mean.
+            return (ordered[(len(ordered) - 1) // 2] + ordered[len(ordered) // 2]) // 2
+        if operation == "SM":
+            return sum(values) % 10
+        raise ValueError(f"Unknown ListOps operation {operation!r}")
+
+    value = parse()
+    if position != len(tokens):
+        raise ValueError("Trailing tokens in ListOps expression")
+    return value
+
+
+def audit_listops_labels(bundle: DatasetBundle, max_examples_per_split: int = 256) -> Dict[str, object]:
+    """Check a deterministic subset against an independent recursive parser."""
+    report: Dict[str, object] = {}
+    for split_name, split in (("train", bundle.train), ("validation", bundle.validation), ("test", bundle.test)):
+        count = min(max_examples_per_split, len(split.labels))
+        # Evenly cover each split rather than auditing only its short prefix.
+        indices = [round(index * (len(split.labels) - 1) / max(count - 1, 1)) for index in range(count)]
+        mismatches = []
+        for index in indices:
+            predicted = evaluate_listops_expression(split.texts[index])
+            if predicted != split.labels[index]:
+                mismatches.append({"index": index, "expected": split.labels[index], "evaluated": predicted})
+                if len(mismatches) >= 5:
+                    break
+        report[split_name] = {"checked": count, "mismatches": mismatches}
+        if mismatches:
+            raise RuntimeError(
+                f"ListOps label audit failed for {split_name}: {mismatches}"
+            )
+    return report
+
+
 def synthetic_bundle(
     num_classes: int = 5, train_size: int = 40, validation_size: int = 15,
     test_size: int = 15, seed: int = 0

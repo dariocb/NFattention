@@ -570,9 +570,13 @@ Experiment `06_listops` uses:
 | Feed-forward size | 1024 |
 | Maximum length | 2,000 |
 | Pooling | Learned CLS token |
+| Classifier head | 512 → 1024 → ReLU → 10 (official LRA head) |
 | Dropout | 0.1 |
 | Effective batch | 32 from microbatch 4 and accumulation 8 |
 | Optimizer steps | 5,000 |
+| Gradient clipping | Disabled, matching the official LRA update |
+| Precision | FP32; AMP is retained only as an explicit comparison option |
+| Label check | Independent recursive audit of 256 examples per split before training |
 | Default spectral pairs | 64 |
 | Checkpoint rule | Maximum validation accuracy |
 

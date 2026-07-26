@@ -22,6 +22,11 @@ The output contains validation-selected predictions, length-bin accuracy,
 length/truncation statistics, wall-clock, throughput, peak CUDA memory,
 checkpoints, tables, and capacity plots.
 
+The shared classifier now matches the official LRA head: `512 -> 1024 -> 10`
+with ReLU after CLS pooling. The ListOps protocol also uses the official
+unclipped Adam update (`gradient_clip=0`) and audits 256 deterministic examples
+per split using an independent recursive ListOps evaluator before training.
+
 ListOps now defaults to FP32 (`--no-mixed-precision`) because the earlier AMP
 run produced non-finite RKA/FSKA training losses. RKA and FSKA write a
 fail-fast `nonfinite_traces/<variant>__seed<seed>.json` record at the first

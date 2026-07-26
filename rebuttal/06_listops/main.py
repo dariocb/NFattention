@@ -18,6 +18,7 @@ import torch
 from rebuttal._shared.classifier import ModelConfig
 from rebuttal._shared.datasets import (
     DatasetBundle,
+    audit_listops_labels,
     load_listops,
     make_loaders,
     synthetic_bundle,
@@ -90,6 +91,10 @@ def main() -> int:
         ),
     )
     parser.add_argument("--download", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--verify-labels", action=argparse.BooleanOptionalAction, default=True,
+        help="Audit 256 deterministic examples per ListOps split with an independent evaluator.",
+    )
     parser.add_argument("--smoke", action="store_true")
     args = parser.parse_args()
 
@@ -105,6 +110,10 @@ def main() -> int:
     else:
         bundle = load_listops(args.data_dir, download=args.download)
         max_length, hidden_dim, n_layers, ff_dim = 2000, 512, 4, 1024
+
+    label_audit = (
+        audit_listops_labels(bundle) if not args.smoke and args.verify_labels else None
+    )
 
     device = resolve_device(args.device)
     primary_variants = [
@@ -158,6 +167,7 @@ def main() -> int:
         "experiment": "listops",
         "dataset": bundle.manifest(),
         "length_statistics": _dataset_length_stats(bundle, max_length),
+        "label_semantic_audit": label_audit,
         "official_protocol": {
             "max_length": max_length,
             "hidden_dim": hidden_dim,
@@ -233,6 +243,7 @@ def main() -> int:
                         qk_mode=str(variant.get("qk_mode", "identity")),
                         kl_weight=float(variant.get("kl_weight", 1e-3)),
                         pooling="cls",
+                        classifier_hidden_dim=64 if args.smoke else 1024,
                         sample_seed=1729 + seed,
                         gradient_checkpointing=not args.smoke,
                     )
@@ -243,6 +254,10 @@ def main() -> int:
                         max_steps=args.steps,
                         eval_every=args.eval_every,
                         warmup_steps=1000,
+                        # Official LRA ListOps Adam updates are not globally
+                        # gradient-clipped. Keeping this at zero restores that
+                        # protocol rather than suppressing early learning.
+                        gradient_clip=0.0,
                         # Full FP32 is the default audit setting. It removes the
                         # train-FP16/eval-FP32 mismatch behind the prior NaNs.
                         mixed_precision=(args.mixed_precision and not args.smoke),

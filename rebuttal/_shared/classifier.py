@@ -32,6 +32,9 @@ class ModelConfig:
     qk_mode: str = "identity"
     kl_weight: float = 1e-3
     pooling: str = "mean"
+    # The official LRA ListOps classifier is a 512 -> 1024 -> 10 MLP. SST-5
+    # retains the compact linear head unless an experiment opts in explicitly.
+    classifier_hidden_dim: int = 0
     pad_idx: int = 0
     sample_seed: int = 1729
     gradient_checkpointing: bool = False
@@ -135,7 +138,14 @@ class SequenceClassifier(nn.Module):
             )
         self.layers = nn.ModuleList(layers)
         self.final_norm = nn.LayerNorm(config.hidden_dim)
-        self.classifier = nn.Linear(config.hidden_dim, config.num_classes)
+        if config.classifier_hidden_dim > 0:
+            self.classifier = nn.Sequential(
+                nn.Linear(config.hidden_dim, config.classifier_hidden_dim),
+                nn.ReLU(),
+                nn.Linear(config.classifier_hidden_dim, config.num_classes),
+            )
+        else:
+            self.classifier = nn.Linear(config.hidden_dim, config.num_classes)
 
     @property
     def kl_weight(self) -> float:

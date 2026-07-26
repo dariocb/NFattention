@@ -247,6 +247,7 @@ def train_model(
             "epoch": float(epoch_number),
             "step": float(global_step),
             "train_cross_entropy": epoch_ce / max(epoch_examples, 1),
+            "train_accuracy": epoch_correct / max(epoch_examples, 1),
             "train_kl_raw": epoch_kl_raw / max(epoch_examples, 1),
             "train_weighted_kl": epoch_kl / max(epoch_examples, 1),
             "train_kl_ce_ratio": epoch_kl / max(epoch_ce, 1e-12),
@@ -280,6 +281,7 @@ def train_model(
             epoch_kl_raw = 0.0
             epoch_kl = 0.0
             epoch_examples = 0
+            epoch_correct = 0
             for batch_index, (
             input_ids,
             attention_mask,
@@ -318,6 +320,9 @@ def train_model(
                 epoch_kl_raw += float(output.kl_raw.detach().item()) * len(labels)
                 epoch_kl += float(weighted_kl.detach().item()) * len(labels)
                 epoch_examples += len(labels)
+                epoch_correct += int(
+                    (output.logits.detach().argmax(dim=-1) == labels).sum().item()
+                )
 
                 boundary = (batch_index + 1) % train_config.gradient_accumulation == 0
                 last_batch = batch_index + 1 == len(loaders.train)
