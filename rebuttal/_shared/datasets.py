@@ -112,6 +112,8 @@ def load_hf_text_classification(
     label_column: str = "label",
     validation_split: str = "validation",
     test_split: str = "test",
+    validation_fraction: float = 0.1,
+    validation_seed: int = 1729,
 ) -> DatasetBundle:
     """Load an explicit Hugging Face text-classification dataset.
 
@@ -128,39 +130,58 @@ def load_hf_text_classification(
     if revision:
         kwargs["revision"] = revision
     dataset = load_dataset(dataset_id, config_name, **kwargs) if config_name else load_dataset(dataset_id, **kwargs)
-    required = {"train", validation_split, test_split}
+    auto_validation = validation_split == "auto"
+    required = {"train", test_split} if auto_validation else {"train", validation_split, test_split}
     missing = required.difference(dataset.keys())
     if missing:
         raise RuntimeError(
             f"{dataset_id} has no required splits {sorted(missing)}. "
             "Pass its explicit split names; do not silently resplit the data."
         )
+    label_splits = ("train", test_split) if auto_validation else ("train", validation_split, test_split)
     raw_labels = sorted({
         int(value)
-        for split_name in ("train", validation_split, test_split)
+        for split_name in label_splits
         for value in dataset[split_name][label_column]
     })
     label_map = {label: index for index, label in enumerate(raw_labels)}
 
-    def convert(split_name: str) -> TextSplit:
+    def convert(split_name: str, indices: Optional[Sequence[int]] = None) -> TextSplit:
         split = dataset[split_name]
         if text_column not in split.column_names or label_column not in split.column_names:
             raise RuntimeError(
                 f"{dataset_id}:{split_name} requires columns {text_column!r} "
                 f"and {label_column!r}; found {split.column_names}"
             )
-        texts = [str(value) for value in split[text_column]]
-        labels = [label_map[int(value)] for value in split[label_column]]
+        if indices is None:
+            indices = range(len(split))
+        texts = [str(split[text_column][index]) for index in indices]
+        labels = [label_map[int(split[label_column][index])] for index in indices]
         return TextSplit(
             texts, labels,
             source=f"{dataset_id}:{split_name}:{revision or 'dataset-default'}",
             checksum=_records_checksum(texts, labels),
         )
 
-    return DatasetBundle(
-        convert("train"), convert(validation_split), convert(test_split),
-        len(label_map), dataset_id.replace("/", "_"),
-    )
+    if auto_validation:
+        if not 0.0 < validation_fraction < 1.0:
+            raise ValueError("validation_fraction must be strictly between zero and one")
+        by_label: Dict[int, List[int]] = {}
+        for index, value in enumerate(dataset["train"][label_column]):
+            by_label.setdefault(int(value), []).append(index)
+        rng = random.Random(validation_seed)
+        validation_indices: List[int] = []
+        for indices in by_label.values():
+            rng.shuffle(indices)
+            count = max(1, round(len(indices) * validation_fraction))
+            validation_indices.extend(indices[:count])
+        validation_set = set(validation_indices)
+        train_indices = [index for index in range(len(dataset["train"])) if index not in validation_set]
+        return DatasetBundle(
+            convert("train", train_indices), convert("train", sorted(validation_indices)), convert(test_split),
+            len(label_map), dataset_id.replace("/", "_"),
+        )
+    return DatasetBundle(convert("train"), convert(validation_split), convert(test_split), len(label_map), dataset_id.replace("/", "_"))
 
 
 def _safe_extract(archive: tarfile.TarFile, destination: Path) -> None:

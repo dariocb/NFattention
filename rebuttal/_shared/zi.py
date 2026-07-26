@@ -30,7 +30,9 @@ def add_zi_arguments(parser: argparse.ArgumentParser, *, default_dataset: str = 
     parser.add_argument("--dataset-revision", default=None)
     parser.add_argument("--text-column", default="text")
     parser.add_argument("--label-column", default="label")
-    parser.add_argument("--validation-split", default="validation")
+    parser.add_argument("--validation-split", default="auto", help="Dataset validation split, or auto for deterministic stratified train split.")
+    parser.add_argument("--validation-fraction", type=float, default=0.1)
+    parser.add_argument("--validation-seed", type=int, default=1729)
     parser.add_argument("--test-split", default="test")
     parser.add_argument("--seeds", default="0,1,2,3,4")
     parser.add_argument("--device", default="cuda")
@@ -58,7 +60,8 @@ def run_zi_grid(args: argparse.Namespace, experiment: str, variants: Sequence[Ma
             args.dataset_id, args.data_dir, config_name=args.dataset_config,
             revision=args.dataset_revision, text_column=args.text_column,
             label_column=args.label_column, validation_split=args.validation_split,
-            test_split=args.test_split,
+            test_split=args.test_split, validation_fraction=args.validation_fraction,
+            validation_seed=args.validation_seed,
         )
         max_length, epochs, patience = args.max_length, args.epochs, args.patience
     device = resolve_device(args.device)

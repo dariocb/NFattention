@@ -33,7 +33,7 @@ case "$MODE" in
   zi_smoke)
     python rebuttal/01_zi_long_documents/main.py --smoke --device cuda:0 --output-dir "$OUT/01"
     python rebuttal/02_zi_fixed_bivariate/main.py --smoke --device cuda:0 --output-dir "$OUT/02"
-    python -c "from rebuttal._shared.datasets import load_hf_text_classification; print(load_hf_text_classification('SetFit/20_newsgroups', __import__('pathlib').Path('$DATA_ROOT')).manifest())"
+    python -c "from rebuttal._shared.datasets import load_hf_text_classification; print(load_hf_text_classification('SetFit/20_newsgroups', __import__('pathlib').Path('$DATA_ROOT'), validation_split='auto').manifest())"
     ;;
   zi01) python rebuttal/01_zi_long_documents/main.py --output-dir "$OUT" "${common[@]}" ;;
   zi02) python rebuttal/02_zi_fixed_bivariate/main.py --output-dir "$OUT" "${common[@]}" ;;
