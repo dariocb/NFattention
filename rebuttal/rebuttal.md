@@ -590,6 +590,7 @@ rather than the smaller sentence-classification encoder.
 |---|---|
 | `01_sst5_diagnostics/fska` | No departure; main FSKA |
 | `02_fixed_density/fixed_bivariate` | Remove the learned flow, sample the frozen prior, and set weighted KL to zero |
+| `02_fixed_density/frozen_flow` | Same RealNVP parameterization and initialization as the learned flow, but frozen; the strict parameter-matched density-learning control |
 | `02_fixed_density/learned_flow` | No departure; main FSKA |
 | `03_kl_sensitivity` | Change only `lambda` over the predeclared grid |
 | `04_elu_gap/raw_rff` | Replace ELU+1 with the signed raw feature map and sign-preserving normalization |
@@ -598,9 +599,9 @@ rather than the smaller sentence-classification encoder.
 | `06_listops/fska_main` | Main FSKA in the larger ListOps encoder |
 | `06_listops/fska_fixed_bivariate` | Fixed density and zero weighted KL |
 | `06_listops/fska_raw_rff` | Raw feature map |
-| `06_listops/fska_learned_qk` | Add learned Q and K projections; fixed V is retained |
-| `06_listops/fska_m32` | Identity Q/K with 32 spectral pairs |
-| `06_listops/fska_m128` | Identity Q/K with 128 spectral pairs |
+| `06_listops/fska_learned_qk` | Add learned Q and K projections; fixed V is retained. This is a five-seed, parameter-comparable primary quality comparator. |
+| `06_listops/fska_m32` | Identity Q/K with 32 spectral pairs (feature-budget ablation, not a parameter-capacity ablation) |
+| `06_listops/fska_m128` | Identity Q/K with 128 spectral pairs (feature-budget ablation, not a parameter-capacity ablation) |
 
 ## Final execution protocol update
 

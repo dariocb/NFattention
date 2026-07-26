@@ -196,7 +196,7 @@ echo "Submitting ListOps arrays with time limit ${LISTOPS_TIME}."
 J06_PRIMARY="$(sbatch --parsable \
     --job-name=fska_06_primary \
     --dependency="${DEPENDENCY}" \
-    --array=0-19 \
+    --array=0-24 \
     --time="${LISTOPS_TIME}" \
     --export=ALL,MODE=06p \
     "${WORKER}")"
@@ -204,7 +204,7 @@ J06_PRIMARY="$(sbatch --parsable \
 J06_ABLATION="$(sbatch --parsable \
     --job-name=fska_06_ablation \
     --dependency="${DEPENDENCY}" \
-    --array=0-14 \
+    --array=0-11 \
     --time="${LISTOPS_TIME}" \
     --export=ALL,MODE=06a \
     "${WORKER}")"

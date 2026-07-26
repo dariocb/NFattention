@@ -36,7 +36,7 @@ class FSKAConfig:
     hidden_dim: int = 128
     n_heads: int = 4
     num_spectral_pairs: int = 64
-    density_mode: str = "learned_flow"  # learned_flow | fixed_bivariate | fixed_single_gaussian | learned_two_component_gmm
+    density_mode: str = "learned_flow"  # learned_flow | frozen_flow | fixed_bivariate | fixed_single_gaussian | learned_two_component_gmm
     feature_map: str = "elu_plus_one"  # elu_plus_one | raw_rff
     qk_mode: str = "identity"  # identity | learned
     value_mode: str = "fixed_orthogonal"
@@ -54,6 +54,7 @@ class FSKAConfig:
             raise ValueError("hidden_dim must be divisible by n_heads")
         if self.density_mode not in {
             "learned_flow",
+            "frozen_flow",
             "fixed_bivariate",
             "fixed_single_gaussian",
             "learned_two_component_gmm",
@@ -126,7 +127,7 @@ class SpectralDensity(nn.Module):
                 self.register_parameter("learned_gmm_means", None)
                 self.register_parameter("learned_gmm_log_scales", None)
 
-            if config.density_mode == "learned_flow":
+            if config.density_mode in {"learned_flow", "frozen_flow"}:
                 mask = torch.tensor(
                     [1.0 if i % 2 == 0 else 0.0 for i in range(dim)]
                 )
@@ -145,6 +146,9 @@ class SpectralDensity(nn.Module):
                     flows.append(nf.flows.ActNorm(dim))
                 base = nf.distributions.DiagGaussian(dim)
                 self.flow = nf.NormalizingFlow(q0=base, flows=flows, p=self.prior)
+                if config.density_mode == "frozen_flow":
+                    for parameter in self.flow.parameters():
+                        parameter.requires_grad_(False)
             else:
                 self.flow = None
 
@@ -153,6 +157,13 @@ class SpectralDensity(nn.Module):
 
     def set_training_step(self, step: int) -> None:
         self._training_step = int(step)
+
+    def train(self, mode: bool = True):
+        """Keep the parameter-matched frozen-flow control completely fixed."""
+        super().train(mode)
+        if self.config.density_mode == "frozen_flow" and self.flow is not None:
+            self.flow.eval()
+        return self
 
     def _device(self) -> torch.device:
         for parameter in self.parameters():
@@ -199,7 +210,10 @@ class SpectralDensity(nn.Module):
         return samples.clamp(-10.0, 10.0)
 
     def reverse_kl(self, count: int, evaluation: bool) -> Tensor:
-        if self.flow is None and self.learned_gmm_means is None:
+        if (
+            self.flow is None
+            or self.config.density_mode == "frozen_flow"
+        ) and self.learned_gmm_means is None:
             return torch.zeros((), device=self._device())
         device = self._device()
         seed = self._seed(evaluation, purpose_offset=7919)

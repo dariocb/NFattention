@@ -121,6 +121,11 @@ def main() -> int:
         {"name": "performer", "model_name": "performer"},
         {"name": "rka", "model_name": "rka"},
         {"name": "fska_main", "model_name": "fska"},
+        {
+            "name": "fska_learned_qk",
+            "model_name": "fska",
+            "qk_mode": "learned",
+        },
     ]
     ablation_variants = [
         {
@@ -133,11 +138,6 @@ def main() -> int:
             "name": "fska_raw_rff",
             "model_name": "fska",
             "feature_map": "raw_rff",
-        },
-        {
-            "name": "fska_learned_qk",
-            "model_name": "fska",
-            "qk_mode": "learned",
         },
         {
             "name": "fska_m32",
@@ -244,6 +244,7 @@ def main() -> int:
                         kl_weight=float(variant.get("kl_weight", 1e-3)),
                         pooling="cls",
                         classifier_hidden_dim=64 if args.smoke else 1024,
+                        official_lra_initialization=not args.smoke,
                         sample_seed=1729 + seed,
                         gradient_checkpointing=not args.smoke,
                     )
@@ -393,7 +394,7 @@ def main() -> int:
             marker="o",
             capsize=3,
         )
-        axis.set_xlabel("Spectral pairs (M)")
+        axis.set_xlabel("Spectral-feature budget (pairs M)")
         axis.set_ylabel("ListOps accuracy")
         axis.grid(alpha=0.25)
         figure.tight_layout()

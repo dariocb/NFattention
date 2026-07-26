@@ -165,10 +165,10 @@ print('ListOps:', load_listops(root / 'listops', download=True).manifest())
         ;;
 
     06p)
-        # One primary variant/seed per GPU task (4 variants x 5 seeds).
+        # One primary variant/seed per GPU task (5 variants x 5 seeds).
         LISTOPS_VARIANT_INDEX=$(( TASK_ID / 5 ))
         LISTOPS_SEED=$(( TASK_ID % 5 ))
-        PRIMARY_VARIANTS=(transformer performer rka fska_main)
+        PRIMARY_VARIANTS=(transformer performer rka fska_main fska_learned_qk)
         python rebuttal/06_listops/main.py \
             --device cuda:0 \
             --primary-seeds "${LISTOPS_SEED}" \
@@ -183,10 +183,10 @@ print('ListOps:', load_listops(root / 'listops', download=True).manifest())
         ;;
 
     06a)
-        # One ablation variant/seed per GPU task (5 variants x 3 seeds).
+        # One ablation variant/seed per GPU task (4 variants x 3 seeds).
         LISTOPS_VARIANT_INDEX=$(( TASK_ID / 3 ))
         LISTOPS_SEED=$(( TASK_ID % 3 ))
-        ABLATION_VARIANTS=(fska_fixed_bivariate fska_raw_rff fska_learned_qk fska_m32 fska_m128)
+        ABLATION_VARIANTS=(fska_fixed_bivariate fska_raw_rff fska_m32 fska_m128)
         python rebuttal/06_listops/main.py \
             --device cuda:0 \
             --primary-seeds "" \

@@ -75,6 +75,30 @@ def test_learned_flow_has_gradients_and_finite_kl():
     assert any(gradient is not None for gradient in flow_gradients)
 
 
+def test_frozen_flow_matches_flow_family_but_has_no_trainable_density():
+    attention = _attention(density_mode="frozen_flow")
+    attention.train()
+    result = attention(
+        torch.randn(2, 5, 16), torch.ones(2, 5, dtype=torch.bool)
+    )
+    before = attention.density.checksum()
+    assert result.kl_raw.item() == 0.0
+    assert not any(
+        parameter.requires_grad
+        for name, parameter in attention.named_parameters()
+        if "density.flow" in name
+    )
+    optimizer = torch.optim.Adam(
+        [parameter for parameter in attention.parameters() if parameter.requires_grad],
+        lr=1e-3,
+    )
+    attention(
+        torch.randn(2, 5, 16), torch.ones(2, 5, dtype=torch.bool)
+    ).output.square().mean().backward()
+    optimizer.step()
+    assert attention.density.checksum() == before
+
+
 def test_linear_contraction_matches_explicit_kernel():
     attention = _attention()
     phi_q = torch.rand(2, 4, 5, 8) + 0.5
@@ -98,4 +122,3 @@ def test_diagnostics_are_feature_sized_not_sequence_square():
     )
     for tensor in result.diagnostics.values():
         assert tensor.ndim < 2 or tensor.shape[-2:] != (11, 11)
-

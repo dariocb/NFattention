@@ -102,6 +102,67 @@ def load_sst5(cache_dir: Path, revision: Optional[str] = None) -> DatasetBundle:
     )
 
 
+def load_hf_text_classification(
+    dataset_id: str,
+    cache_dir: Path,
+    *,
+    config_name: Optional[str] = None,
+    revision: Optional[str] = None,
+    text_column: str = "text",
+    label_column: str = "label",
+    validation_split: str = "validation",
+    test_split: str = "test",
+) -> DatasetBundle:
+    """Load an explicit Hugging Face text-classification dataset.
+
+    This deliberately does not guess a dataset repository or manufacture a
+    validation split.  The ``*_zi`` reproduction suite records every supplied
+    identifier/split/column in its manifest, because the attached response PDF
+    does not specify these indispensable provenance details.
+    """
+    try:
+        from datasets import load_dataset
+    except ImportError as exc:
+        raise RuntimeError("This loader requires the 'datasets' package.") from exc
+    kwargs: Dict[str, object] = {"cache_dir": str(cache_dir)}
+    if revision:
+        kwargs["revision"] = revision
+    dataset = load_dataset(dataset_id, config_name, **kwargs) if config_name else load_dataset(dataset_id, **kwargs)
+    required = {"train", validation_split, test_split}
+    missing = required.difference(dataset.keys())
+    if missing:
+        raise RuntimeError(
+            f"{dataset_id} has no required splits {sorted(missing)}. "
+            "Pass its explicit split names; do not silently resplit the data."
+        )
+    raw_labels = sorted({
+        int(value)
+        for split_name in ("train", validation_split, test_split)
+        for value in dataset[split_name][label_column]
+    })
+    label_map = {label: index for index, label in enumerate(raw_labels)}
+
+    def convert(split_name: str) -> TextSplit:
+        split = dataset[split_name]
+        if text_column not in split.column_names or label_column not in split.column_names:
+            raise RuntimeError(
+                f"{dataset_id}:{split_name} requires columns {text_column!r} "
+                f"and {label_column!r}; found {split.column_names}"
+            )
+        texts = [str(value) for value in split[text_column]]
+        labels = [label_map[int(value)] for value in split[label_column]]
+        return TextSplit(
+            texts, labels,
+            source=f"{dataset_id}:{split_name}:{revision or 'dataset-default'}",
+            checksum=_records_checksum(texts, labels),
+        )
+
+    return DatasetBundle(
+        convert("train"), convert(validation_split), convert(test_split),
+        len(label_map), dataset_id.replace("/", "_"),
+    )
+
+
 def _safe_extract(archive: tarfile.TarFile, destination: Path) -> None:
     root = destination.resolve()
     for member in archive.getmembers():

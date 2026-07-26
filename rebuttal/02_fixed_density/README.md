@@ -1,17 +1,20 @@
-# Fixed bivariate density
+# Fixed versus learned density
 
-Compares four paired arms while holding the attention architecture and seeds
-fixed: a conventional fixed single joint Gaussian, a frozen fixed
-10-component bivariate spectral-mixture prior, a learned two-component
-equal-weight Gaussian mixture without a flow, and the learned RealNVP flow.
-The frozen-mixture, learned-two-component, and flow arms share the same frozen
-10-component KL target; the single-Gaussian arm is an additional conventional
-stationary baseline. Initial and final
-prior/density checksums are included in `runs.jsonl`.
+This experiment separates density learning from density-family and parameter
+count effects. It compares a fixed single Gaussian, fixed 10-component
+bivariate prior, learned two-component GMM, frozen RealNVP, and learned
+RealNVP while holding the encoder, feature map, Q/K mode, seeds, and training
+budget fixed.
+
+`frozen_flow` has exactly the same RealNVP architecture and initialization as
+`learned_flow`, but all flow parameters are frozen and its KL weight is zero.
+The paired frozen-flow versus learned-flow comparison is therefore the strict
+parameter-matched test of adapting the flow density itself.
 
 ```bash
 bash rebuttal/02_fixed_density/run.sh
 ```
 
-The fixed arm must have identical initial and final checksums. Any failed seed
-causes a nonzero launcher exit.
+Initial/final prior and density checksums are included in `runs.jsonl`. The
+fixed arms and frozen-flow arm must remain unchanged; any failed seed produces
+a nonzero launcher exit.

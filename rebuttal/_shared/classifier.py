@@ -27,6 +27,7 @@ class ModelConfig:
     dropout: float = 0.1
     feature_width: int = 128
     num_spectral_pairs: int = 64
+    num_flows: int = 3
     density_mode: str = "learned_flow"
     feature_map: str = "elu_plus_one"
     qk_mode: str = "identity"
@@ -35,6 +36,9 @@ class ModelConfig:
     # The official LRA ListOps classifier is a 512 -> 1024 -> 10 MLP. SST-5
     # retains the compact linear head unless an experiment opts in explicitly.
     classifier_hidden_dim: int = 0
+    # LRA's released Transformer uses bias-free Q/K/V/O projections and Xavier
+    # linear initialization. Keep this opt-in so SST-5 results remain intact.
+    official_lra_initialization: bool = False
     pad_idx: int = 0
     sample_seed: int = 1729
     gradient_checkpointing: bool = False
@@ -116,6 +120,7 @@ class SequenceClassifier(nn.Module):
                         hidden_dim=config.hidden_dim,
                         n_heads=config.n_heads,
                         num_spectral_pairs=config.num_spectral_pairs,
+                        num_flows=config.num_flows,
                         density_mode=config.density_mode,
                         feature_map=config.feature_map,
                         qk_mode=config.qk_mode,
@@ -132,6 +137,7 @@ class SequenceClassifier(nn.Module):
                     config.feature_width,
                     config.dropout,
                     seed,
+                    attention_bias=not config.official_lra_initialization,
                 )
             layers.append(
                 EncoderLayer(attention, config.hidden_dim, config.ff_dim, config.dropout)
@@ -146,6 +152,29 @@ class SequenceClassifier(nn.Module):
             )
         else:
             self.classifier = nn.Linear(config.hidden_dim, config.num_classes)
+        # Do not overwrite the deliberately initialized RealNVP/ActNorm flow
+        # internals in FSKA. The exact released-LRA initialization applies to
+        # the Transformer control only.
+        if config.official_lra_initialization and config.model_name == "transformer":
+            self._initialize_like_lra()
+
+    def _initialize_like_lra(self) -> None:
+        """Match the released LRA Transformer initialization conventions."""
+        for module in self.modules():
+            if isinstance(module, nn.Embedding):
+                nn.init.normal_(module.weight, mean=0.0, std=1.0)
+                if module.padding_idx is not None:
+                    with torch.no_grad():
+                        module.weight[module.padding_idx].zero_()
+            elif isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.normal_(module.bias, mean=0.0, std=1e-6)
+            elif isinstance(module, nn.MultiheadAttention):
+                nn.init.xavier_uniform_(module.in_proj_weight)
+                if module.in_proj_bias is not None:
+                    nn.init.normal_(module.in_proj_bias, mean=0.0, std=1e-6)
+                nn.init.xavier_uniform_(module.out_proj.weight)
 
     @property
     def kl_weight(self) -> float:

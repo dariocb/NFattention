@@ -3,7 +3,7 @@
 Downloads the official LRA release when needed and reruns Transformer,
 Performer, linear RKA, and FSKA under one PyTorch pipeline. Focused FSKA arms
 cover a fixed bivariate density, raw features, learned Q/K, and the
-32/64/128-pair capacity curve.
+32/64/128-pair feature-budget curve.
 
 ```bash
 bash rebuttal/06_listops/run.sh
@@ -32,3 +32,9 @@ run produced non-finite RKA/FSKA training losses. RKA and FSKA write a
 fail-fast `nonfinite_traces/<variant>__seed<seed>.json` record at the first
 non-finite module boundary. Set `--mixed-precision` only for a separate AMP
 comparison, never as the primary stability result.
+
+The paper-configuration `fska_main` remains a primary result. A learned-Q/K
+FSKA is also a five-seed primary comparator: at approximately 8.31M parameters
+it is within 10% of the approximately 8.95M Transformer, whereas main FSKA is
+smaller by design. The 32/64/128-pair ablation changes feature computation and
+approximation quality, not trainable parameter count.

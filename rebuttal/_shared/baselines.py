@@ -38,10 +38,14 @@ def _linear_context(phi_q: Tensor, phi_k: Tensor, values: Tensor, mask: Tensor) 
 
 
 class TransformerAttention(nn.Module):
-    def __init__(self, hidden_dim: int, n_heads: int, dropout: float = 0.1, **_: object):
+    def __init__(
+        self, hidden_dim: int, n_heads: int, dropout: float = 0.1,
+        attention_bias: bool = True, **_: object
+    ):
         super().__init__()
         self.attention = nn.MultiheadAttention(
-            hidden_dim, n_heads, dropout=dropout, batch_first=True
+            hidden_dim, n_heads, dropout=dropout, batch_first=True,
+            bias=attention_bias,
         )
 
     def forward(
@@ -179,6 +183,7 @@ def build_attention(
     feature_width: int,
     dropout: float,
     sample_seed: int,
+    attention_bias: bool = True,
 ) -> nn.Module:
     common = dict(
         hidden_dim=hidden_dim,
@@ -186,6 +191,7 @@ def build_attention(
         feature_width=feature_width,
         dropout=dropout,
         sample_seed=sample_seed,
+        attention_bias=attention_bias,
     )
     if model_name == "transformer":
         return TransformerAttention(**common)
@@ -194,4 +200,3 @@ def build_attention(
     if model_name == "rka":
         return RKAAttention(**common)
     raise ValueError(f"Unknown baseline: {model_name}")
-

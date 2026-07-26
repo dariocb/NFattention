@@ -43,6 +43,17 @@ def main() -> int:
             "kl_weight": 1e-3,
         },
         {
+            "name": "frozen_flow",
+            "model_name": "fska",
+            # Same RealNVP architecture, initialization, and spectral samples
+            # as learned_flow, but all flow parameters are frozen. This is the
+            # parameter-matched control for learning the density itself.
+            "density_mode": "frozen_flow",
+            "feature_map": "elu_plus_one",
+            "qk_mode": "identity",
+            "kl_weight": 0.0,
+        },
+        {
             "name": "learned_flow",
             "model_name": "fska",
             "density_mode": "learned_flow",
