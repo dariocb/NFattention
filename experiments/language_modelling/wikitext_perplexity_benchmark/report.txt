@@ -1,0 +1,29 @@
+
+
+Wikitext NTP
+			        |   Test PPL    |
+Transformer	        |     36.08     | ?
+Mikan		        |     38.10     | ?
+Performer	        |     72.60     |
+rka    				|	  xx.xx		|
+gmm_rks				|	  98.91		|
+ours_shared_ngsm	|	  68.64		|
+ours_hybrid_ngsm	|	  68.76		|
+ours_hybrid_rbf		|	  68.72		|
+ours_hybrid_noprior |	  nan		|
+
+
+ours:
+
+non causal model:
+
+        omega1, omega2 = self.sample_spectral_density(batch_size)
+        phi_q = self.compute_rff_features(q, omega1, omega2)
+-->>    phi_k = self.compute_rff_features(k, omega1, omega2) ---------- k is not masked yet
+        phi_q = torch.nn.functional.elu(phi_q) + 1.0
+        phi_k = torch.nn.functional.elu(phi_k) + 1.0
+		
+        kv_summary = torch.einsum("bhlm,bhld->bhmd", phi_k, v)
+-->>    k_summary = torch.sum(phi_k, dim=2)
+        output = torch.einsum("bhlm,bhmd->bhld", phi_q, kv_summary)
+        denominator = torch.einsum("bhlm,bhm->bhl", phi_q, k_summary).clamp(min=1e-6).unsqueeze(-1)

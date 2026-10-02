@@ -6,7 +6,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --time=4-00:00:00
+#SBATCH --time=1-00:00:00
 
 set -euo pipefail
 
@@ -27,6 +27,7 @@ export CUDA_VISIBLE_DEVICES=0
 
 python -m experiments.language_modelling.wikitext_perplexity_benchmark.run_benchmark \
   --seeds 0 \
+  --models gmm_rks \
   --gpu 0 \
   --no_cpu_fallback
 
